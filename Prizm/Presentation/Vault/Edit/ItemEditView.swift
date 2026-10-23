@@ -75,7 +75,7 @@ struct ItemEditView: View {
                     // multiple collections, extra collection IDs (outside this org) are
                     // preserved on save; only the selected collection within this org changes.
                     let orgCollectionIds = Set(orgCollections.map(\.id))
-                    DetailSectionCard("Collection") {
+                    DetailSectionCard(String(localized: "Collection")) {
                         HStack {
                             Picker(selection: Binding(
                                 get: {
@@ -102,7 +102,7 @@ struct ItemEditView: View {
                     }
                 }
             } else if !viewModel.folders.isEmpty {
-                DetailSectionCard("Folder") {
+                DetailSectionCard(String(localized: "Folder")) {
                     HStack {
                         Picker(selection: $viewModel.draft.folderId) {
                             Text("None").tag(String?.none)
@@ -135,7 +135,12 @@ struct ItemEditView: View {
                 .accessibilityIdentifier(AccessibilityID.Edit.deleteButton)
             }
         }
-        .frame(minWidth: 480, minHeight: 400)
+        .frame(
+            minWidth: 480,
+            idealWidth: isSecureNote ? EditorLayout.noteSheetWidth : nil,
+            minHeight: 400,
+            idealHeight: isSecureNote ? EditorLayout.noteSheetHeight : nil
+        )
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button("Discard") {
@@ -189,6 +194,11 @@ struct ItemEditView: View {
     }
 
     // MARK: - Per-type dispatch
+
+    private var isSecureNote: Bool {
+        if case .secureNote = viewModel.draft.content { return true }
+        return false
+    }
 
     @ViewBuilder
     private var typeEditForm: some View {

@@ -40,6 +40,7 @@ final class AppContainer: ObservableObject {
     let generateTOTPCodeUseCase:         GenerateTOTPCodeUseCaseImpl
     let editVaultItemUseCase:            EditVaultItemUseCaseImpl
     let createVaultItemUseCase:          CreateVaultItemUseCaseImpl
+    let archiveVaultItemUseCase:         ArchiveVaultItemUseCaseImpl
     let deleteVaultItemUseCase:          DeleteVaultItemUseCaseImpl
     let permanentDeleteVaultItemUseCase: PermanentDeleteVaultItemUseCaseImpl
     let restoreVaultItemUseCase:         RestoreVaultItemUseCaseImpl
@@ -120,6 +121,7 @@ final class AppContainer: ObservableObject {
         self.generateTOTPCodeUseCase         = GenerateTOTPCodeUseCaseImpl(crypto: crypto)
         self.editVaultItemUseCase            = EditVaultItemUseCaseImpl(repository: vault)
         self.createVaultItemUseCase          = CreateVaultItemUseCaseImpl(repository: vault)
+        self.archiveVaultItemUseCase         = ArchiveVaultItemUseCaseImpl(repository: vault)
         self.deleteVaultItemUseCase          = DeleteVaultItemUseCaseImpl(repository: vault)
         self.permanentDeleteVaultItemUseCase = PermanentDeleteVaultItemUseCaseImpl(repository: vault)
         self.restoreVaultItemUseCase         = RestoreVaultItemUseCaseImpl(repository: vault)
@@ -173,6 +175,7 @@ final class AppContainer: ObservableObject {
         VaultBrowserViewModel(
             vault:            vaultStore,
             search:           searchVaultUseCase,
+            archive:          archiveVaultItemUseCase,
             delete:           deleteVaultItemUseCase,
             permanentDelete:  permanentDeleteVaultItemUseCase,
             restore:          restoreVaultItemUseCase,

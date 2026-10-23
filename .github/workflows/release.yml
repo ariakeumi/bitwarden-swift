@@ -87,13 +87,13 @@ jobs:
 
       - name: Create DMG
         run: |
-          APP="build/Build/Products/Release/Prizm.app"
+          APP="build/Build/Products/Release/Bitvault.app"
           VERSION="${GITHUB_REF_NAME}"
           DMG_NAME="Prizm-${VERSION}.dmg"
 
           STAGING="dmg-staging"
           mkdir -p "$STAGING"
-          cp -R "$APP" "$STAGING/Prizm.app"
+          cp -R "$APP" "$STAGING/Bitvault.app"
           ln -s /Applications "$STAGING/Applications"
 
           hdiutil create \
@@ -147,6 +147,8 @@ jobs:
           git clone "https://x-access-token:${TAP_GITHUB_TOKEN}@github.com/b0x42/homebrew-prizm.git" tap
           cd tap
 
+          sed -i '' 's/app "Prizm.app"/app "Bitvault.app"/' Casks/prizm.rb
+          sed -i '' 's/name "Prizm"/name "Bitvault"/' Casks/prizm.rb
           sed -i '' "s/version \".*\"/version \"${VERSION}\"/" Casks/prizm.rb
           sed -i '' "s/sha256 \".*\"/sha256 \"${SHA}\"/" Casks/prizm.rb
 

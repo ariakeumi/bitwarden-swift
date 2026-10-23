@@ -72,7 +72,7 @@ struct SidebarView: View {
                 sidebarSections.move(fromOffsets: from, toOffset: to)
             }
         }
-        .navigationTitle("Prizm")
+        .navigationTitle("Bitvault")
         .alert("Delete Collection", isPresented: $showDeleteCollectionAlert,
                presenting: collectionToDelete) { col in
             Button("Delete", role: .destructive) {
@@ -128,9 +128,9 @@ struct SidebarView: View {
     private func renderRows(for section: SidebarSection) -> some View {
         switch section {
         case .menu:
-            SidebarRowView(title: "All Items", systemImage: "square.grid.2x2", selection: .allItems, count: itemCounts[.allItems] ?? 0)
-            SidebarRowView(title: "Favorites", systemImage: "star", selection: .favorites, count: itemCounts[.favorites] ?? 0)
-            SidebarRowView(title: "Codes", systemImage: "clock", selection: .verificationCodes, count: itemCounts[.verificationCodes] ?? 0)
+            SidebarRowView(title: String(localized: "All Items"), systemImage: "square.grid.2x2", selection: .allItems, count: itemCounts[.allItems] ?? 0)
+            SidebarRowView(title: String(localized: "Favorites"), systemImage: "star", selection: .favorites, count: itemCounts[.favorites] ?? 0)
+            SidebarRowView(title: String(localized: "Codes"), systemImage: "clock", selection: .verificationCodes, count: itemCounts[.verificationCodes] ?? 0)
         case .folders:
             if isCreatingFolder {
                 TextField("Name or Parent/Name", text: $newFolderName, onCommit: {
@@ -194,7 +194,9 @@ struct SidebarView: View {
                 )
             }
         case .trash:
-            SidebarRowView(title: "Trash", systemImage: "trash", selection: .trash, count: itemCounts[.trash] ?? 0)
+            SidebarRowView(title: String(localized: "Archive"), systemImage: "archivebox", selection: .archive, count: itemCounts[.archive] ?? 0)
+                .accessibilityIdentifier("sidebar.archive")
+            SidebarRowView(title: String(localized: "Trash"), systemImage: "trash", selection: .trash, count: itemCounts[.trash] ?? 0)
         }
     }
 
@@ -546,5 +548,11 @@ private struct SidebarRowView: View {
             .font(Typography.sidebarRow)
             .badge(count)
             .tag(selection)
+            .help(shortcutHelp)
+    }
+
+    private var shortcutHelp: String {
+        guard let number = selection.shortcutNumber else { return selection.displayName }
+        return "\(selection.displayName) (⌘\(number))"
     }
 }

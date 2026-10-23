@@ -412,3 +412,157 @@ func XCTAssertThrowsErrorAsync<T>(
         errorHandler(error)
     }
 }
+
+/// Policy tests use a private defaults domain and in-memory Keychain only.
+@MainActor
+final class VaultLockPolicyTests: XCTestCase {
+    private var defaults: UserDefaults!
+    private var suite: String!
+    private var keychain: MockKeychainService!
+    private var crypto: MockPrizmCryptoService!
+    private var api: MockPrizmAPIClient!
+    private var sut: AuthRepositoryImpl!
+
+    override func setUp() async throws {
+        suite = "VaultLockPolicyTests.\(UUID().uuidString)"
+        defaults = UserDefaults(suiteName: suite)!
+        keychain = MockKeychainService()
+        crypto = MockPrizmCryptoService()
+        api = MockPrizmAPIClient()
+        keychain.seed(key: KeychainKey.activeUserId, value: "policy-user")
+        keychain.seed(key: KeychainKey.user("policy-user", "email"), value: "policy@example.com")
+        let env = ServerEnvironment(base: URL(string: "https://vault.example.com")!, overrides: nil)
+        keychain.seed(key: KeychainKey.user("policy-user", "serverEnvironment"), data: try JSONEncoder().encode(env))
+        sut = makeRepository(boot: "boot-a")
+    }
+
+    override func tearDown() async throws {
+        defaults.removePersistentDomain(forName: suite)
+    }
+
+    private func makeRepository(boot: String?) -> AuthRepositoryImpl {
+        AuthRepositoryImpl(apiClient: api, crypto: crypto, keychain: keychain,
+                           biometricKeychain: MockBiometricKeychainService(),
+                           defaults: defaults, bootSessionID: { boot })
+    }
+
+    func testDefaultRequiresUnlockOnReopen() async throws {
+        XCTAssertEqual(sut.vaultLockPolicy, .onReopen)
+        let restored = try await sut.restoreUnlockedSession()
+        XCTAssertNil(restored)
+    }
+
+    func testNeverRestoresAcrossAppAndComputerRestarts() async throws {
+        await crypto.unlockWith(keys: crypto.stubbedVaultKeys)
+        try await sut.setVaultLockPolicy(.never)
+        await crypto.lockVault() // Simulate process memory disappearing, without manual lock.
+        let restored = try await makeRepository(boot: "boot-b").restoreUnlockedSession()
+        XCTAssertEqual(restored?.userId, "policy-user")
+        XCTAssertTrue(crypto.isUnlocked)
+    }
+
+    func testRestartRestoresWithinSameBootButNotAfterReboot() async throws {
+        await crypto.unlockWith(keys: crypto.stubbedVaultKeys)
+        try await sut.setVaultLockPolicy(.onRestart)
+        await crypto.lockVault()
+        let sameBoot = try await makeRepository(boot: "boot-a").restoreUnlockedSession()
+        XCTAssertNotNil(sameBoot)
+        await crypto.lockVault()
+        let nextBoot = try await makeRepository(boot: "boot-b").restoreUnlockedSession()
+        XCTAssertNil(nextBoot)
+        XCTAssertFalse(crypto.isUnlocked)
+        // Changing to Never while locked must not promote an expired retained key.
+        let next = makeRepository(boot: "boot-b")
+        try await next.setVaultLockPolicy(.never)
+        let promoted = try await next.restoreUnlockedSession()
+        XCTAssertNil(promoted)
+    }
+
+    func testUnknownBootFailsClosed() async throws {
+        await crypto.unlockWith(keys: crypto.stubbedVaultKeys)
+        try await sut.setVaultLockPolicy(.onRestart)
+        await crypto.lockVault()
+        let restored = try await makeRepository(boot: nil).restoreUnlockedSession()
+        XCTAssertNil(restored)
+    }
+
+    func testManualLockRevokesNeverSessionEvenIfDeletionFails() async throws {
+        await crypto.unlockWith(keys: crypto.stubbedVaultKeys)
+        try await sut.setVaultLockPolicy(.never)
+        keychain.deleteError = KeychainError.unexpectedStatus(-1)
+        await sut.lockVault()
+        let restored = try await makeRepository(boot: "boot-a").restoreUnlockedSession()
+        XCTAssertNil(restored)
+        XCTAssertFalse(crypto.isUnlocked)
+    }
+
+    func testReopenPolicyRemovesRetainedSession() async throws {
+        await crypto.unlockWith(keys: crypto.stubbedVaultKeys)
+        try await sut.setVaultLockPolicy(.never)
+        try await sut.setVaultLockPolicy(.onReopen)
+        await crypto.lockVault()
+        let restored = try await makeRepository(boot: "boot-a").restoreUnlockedSession()
+        XCTAssertNil(restored)
+        XCTAssertTrue(keychain.deletedKeys.contains(KeychainKey.user("policy-user", "unlockedSession")))
+    }
+
+    func testChangingPolicyWhileLockedDoesNotRetainKeys() async throws {
+        try await sut.setVaultLockPolicy(.never)
+        XCTAssertEqual(sut.vaultLockPolicy, .never)
+        let restored = try await sut.restoreUnlockedSession()
+        XCTAssertNil(restored)
+    }
+
+    func testSignOutRevokesRetainedSession() async throws {
+        await crypto.unlockWith(keys: crypto.stubbedVaultKeys)
+        try await sut.setVaultLockPolicy(.never)
+        try await sut.signOut()
+        XCTAssertTrue(keychain.deletedKeys.contains(KeychainKey.user("policy-user", "unlockedSession")))
+        XCTAssertNil(sut.storedAccount())
+    }
+
+    func testCorruptSessionDoesNotUnlock() async throws {
+        await crypto.unlockWith(keys: crypto.stubbedVaultKeys)
+        try await sut.setVaultLockPolicy(.never)
+        keychain.seed(key: KeychainKey.user("policy-user", "unlockedSession"), data: Data("invalid".utf8))
+        await crypto.lockVault()
+        let restored = try? await sut.restoreUnlockedSession()
+        XCTAssertNil(restored)
+        XCTAssertFalse(crypto.isUnlocked)
+    }
+
+    func testPersistenceFailureKeepsPreviousPolicyAndRevokesRestoration() async throws {
+        await crypto.unlockWith(keys: crypto.stubbedVaultKeys)
+        try await sut.setVaultLockPolicy(.onRestart)
+        keychain.writeError = KeychainError.unexpectedStatus(-1)
+        do {
+            try await sut.setVaultLockPolicy(.never)
+            XCTFail("Must report failed persistence")
+        } catch {}
+        XCTAssertEqual(sut.vaultLockPolicy, .onRestart)
+        await crypto.lockVault()
+        let restored = try await sut.restoreUnlockedSession()
+        XCTAssertNil(restored)
+    }
+
+    func testPasswordUnlockRetainsSessionAndRestoresAPIState() async throws {
+        keychain.seed(key: KeychainKey.user("policy-user", "encUserKey"), value: "2.encrypted")
+        keychain.seed(key: KeychainKey.user("policy-user", "kdfParams"), data: try JSONEncoder().encode(
+            KdfParams(type: .pbkdf2, iterations: 600_000, memory: nil, parallelism: nil)))
+        keychain.seed(key: KeychainKey.user("policy-user", "accessToken"), value: "access-token")
+        try await sut.setVaultLockPolicy(.never) // Configure while locked.
+        _ = try await sut.unlockWithPassword(Data("password".utf8))
+        await crypto.lockVault()
+        await api.setBaseURL(URL(string: "https://wrong.example.com")!)
+        await api.clearAccessToken()
+        let restored = try await makeRepository(boot: "boot-b").restoreUnlockedSession()
+        XCTAssertEqual(restored?.userId, "policy-user")
+        XCTAssertEqual(api.baseURL?.absoluteString, "https://vault.example.com")
+        XCTAssertEqual(api.storedAccessToken, "access-token")
+    }
+
+    func testUnknownPreferenceDefaultsToReopen() {
+        defaults.set("unknown-policy", forKey: "vaultLockPolicy")
+        XCTAssertEqual(sut.vaultLockPolicy, .onReopen)
+    }
+}

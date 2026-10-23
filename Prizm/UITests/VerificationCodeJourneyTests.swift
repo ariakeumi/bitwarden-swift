@@ -46,7 +46,56 @@ final class VerificationCodeJourneyTests: XCTestCase {
         row.click()
     }
 
+    func testArchiveVisibilitySearchAndDetail() {
+        XCTAssertFalse(element("itemList.row.archived").exists)
+        let archive = element("sidebar.archive")
+        XCTAssertTrue(archive.waitForExistence(timeout: 5))
+        archive.click()
+        openItem("archived")
+        XCTAssertTrue(element("archive.statusBanner").waitForExistence(timeout: 5))
+        XCTAssertEqual(element("archive.toolbarAction").label, "Unarchive")
+        let search = app.searchFields.firstMatch
+        search.click()
+        search.typeText("Archived")
+        XCTAssertTrue(element("itemList.row.archived").waitForExistence(timeout: 5))
+        XCTAssertFalse(element("itemList.row.alpha").exists)
+        search.click()
+        app.typeKey("a", modifierFlags: .command)
+        search.typeText(XCUIKeyboardKey.delete.rawValue)
+
+        app.typeKey("3", modifierFlags: .command)
+        XCTAssertTrue(element("verificationCodes.row.alpha").waitForExistence(timeout: 5))
+        XCTAssertFalse(element("verificationCodes.row.archived").exists)
+    }
+
+    func testArchiveToolbarShowsConfirmationAndCancelKeepsItem() {
+        openItem("alpha")
+        let action = element("archive.toolbarAction")
+        XCTAssertTrue(action.waitForExistence(timeout: 5))
+        action.click()
+        let alert = app.alerts.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 5))
+        alert.buttons["Cancel"].click()
+        XCTAssertTrue(element("itemList.row.alpha").exists)
+        XCTAssertFalse(element("archive.statusBanner").exists)
+    }
+
     // MARK: - US1: one item
+
+    func testCommandNumberNavigatesSidebar() {
+        app.typeKey("3", modifierFlags: .command)
+        XCTAssertTrue(element("verificationCodes.row.alpha").waitForExistence(timeout: 5))
+
+        app.typeKey("4", modifierFlags: .command)
+        XCTAssertTrue(element("itemList.row.alpha").waitForExistence(timeout: 5))
+
+        app.typeKey("9", modifierFlags: .command)
+        XCTAssertTrue(element("itemList.row.zeta").waitForExistence(timeout: 5))
+
+        app.typeKey("1", modifierFlags: .command)
+        XCTAssertTrue(element("itemList.row.alpha").waitForExistence(timeout: 5))
+        XCTAssertFalse(element("itemList.row.zeta").exists)
+    }
 
     func testDetailPane_showsVerificationCode_forItemWithSeed() {
         openItem("alpha")
@@ -85,6 +134,7 @@ final class VerificationCodeJourneyTests: XCTestCase {
         XCTAssertTrue(delta.exists)
         XCTAssertFalse(element("verificationCodes.row.gamma").exists, "No seed: not listed")
         XCTAssertFalse(element("verificationCodes.row.zeta").exists, "Trashed: not listed")
+        XCTAssertFalse(element("verificationCodes.row.archived").exists, "Archived: not listed")
         XCTAssertLessThan(alpha.frame.minY, beta.frame.minY)
         XCTAssertLessThan(beta.frame.minY, delta.frame.minY)
     }
@@ -133,7 +183,7 @@ final class VerificationCodeJourneyTests: XCTestCase {
     func testLock_removesCodes() {
         openVerificationCodes()
         XCTAssertTrue(element("verificationCodes.code.alpha").waitForExistence(timeout: 10))
-        app.menuBars.menuBarItems["Prizm"].click()
+        app.menuBars.menuBarItems["Bitvault"].click()
         app.menuBars.menuItems["Lock Vault"].click()
         XCTAssertFalse(element("verificationCodes.code.alpha").waitForExistence(timeout: 3),
                        "No code may be visible after lock")

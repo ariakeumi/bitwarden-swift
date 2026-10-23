@@ -31,7 +31,7 @@ struct AboutViewModel {
     @MainActor
     static func forCurrentApp() -> AboutViewModel {
         AboutViewModel(
-            appName: Bundle.main.infoDictionary?["CFBundleName"] as? String ?? "Prizm",
+            appName: Bundle.main.infoDictionary?["CFBundleName"] as? String ?? "Bitvault",
             version: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "",
             tagline: "Your secrets. Your server. Our user interface.",
             gitHubURL: URL(string: "https://github.com/b0x42/prizm")!,

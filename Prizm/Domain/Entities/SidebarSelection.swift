@@ -15,11 +15,11 @@ nonisolated enum ItemType: String, Equatable, Hashable, CaseIterable, Identifiab
 
     var displayName: String {
         switch self {
-        case .login:      return "Login"
-        case .card:       return "Card"
-        case .identity:   return "Identity"
-        case .secureNote: return "Secure Note"
-        case .sshKey:     return "SSH Key"
+        case .login:      return  String(localized: "Login")
+        case .card:       return  String(localized: "Card")
+        case .identity:   return  String(localized: "Identity")
+        case .secureNote: return  String(localized: "Secure Note")
+        case .sshKey:     return  String(localized: "SSH Key")
         }
     }
 
@@ -50,6 +50,8 @@ nonisolated enum SidebarSelection {
     case folder(String)
     /// Soft-deleted items awaiting permanent removal (Bitwarden Trash).
     case trash
+    /// Archived, non-deleted items, excluded from active vault scopes.
+    case archive
     /// Non-trashed Login items that carry a TOTP seed, shown with their current code.
     case verificationCodes
     /// Transient state while the user is typing a new folder name inline.
@@ -63,18 +65,30 @@ nonisolated enum SidebarSelection {
 }
 
 extension SidebarSelection {
+    /// Stable ⌘1–⌘9 destinations; folders and organizations do not shift these bindings.
+    static let shortcutDestinations: [SidebarSelection] = [
+        .allItems, .favorites, .verificationCodes,
+        .type(.login), .type(.card), .type(.identity), .type(.secureNote), .type(.sshKey),
+        .trash,
+    ]
+
+    var shortcutNumber: Int? {
+        Self.shortcutDestinations.firstIndex(of: self).map { $0 + 1 }
+    }
+
     var displayName: String {
         switch self {
-        case .allItems:                      return "All Items"
-        case .favorites:                     return "Favorites"
+        case .allItems:                      return  String(localized: "All Items")
+        case .favorites:                     return  String(localized: "Favorites")
         case .type(let type):                return type.displayName
-        case .folder:                        return "Folder"
-        case .trash:                         return "Trash"
-        case .verificationCodes:             return "Codes"
-        case .newFolder:                     return "New Folder"
-        case .organization:                  return "Organization"
-        case .collection:                    return "Collection"
-        case .newCollection:                 return "New Collection"
+        case .folder:                        return  String(localized: "Folder")
+        case .archive:                       return String(localized: "Archive")
+        case .trash:                         return  String(localized: "Trash")
+        case .verificationCodes:             return  String(localized: "Codes")
+        case .newFolder:                     return  String(localized: "New Folder")
+        case .organization:                  return  String(localized: "Organization")
+        case .collection:                    return  String(localized: "Collection")
+        case .newCollection:                 return  String(localized: "New Collection")
         }
     }
 }
@@ -86,6 +100,7 @@ nonisolated extension SidebarSelection: Hashable {
         case (.favorites, .favorites):                                   return true
         case (.type(let a), .type(let b)):                               return a == b
         case (.folder(let a), .folder(let b)):                           return a == b
+        case (.archive, .archive):                                      return true
         case (.trash, .trash):                                           return true
         case (.verificationCodes, .verificationCodes):                   return true
         case (.newFolder, .newFolder):                                   return true
@@ -102,6 +117,7 @@ nonisolated extension SidebarSelection: Hashable {
         case .favorites:                         hasher.combine(1)
         case .type(let type):                    hasher.combine(2); hasher.combine(type)
         case .folder(let id):                    hasher.combine(3); hasher.combine(id)
+        case .archive:                           hasher.combine(10)
         case .trash:                             hasher.combine(4)
         case .newFolder:                         hasher.combine(5)
         case .organization(let id):              hasher.combine(6); hasher.combine(id)

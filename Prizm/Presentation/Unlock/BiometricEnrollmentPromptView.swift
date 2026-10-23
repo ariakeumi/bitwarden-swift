@@ -14,9 +14,9 @@ struct BiometricEnrollmentPromptView: View {
 
     private var biometryName: String {
         switch LAContext().biometryType {
-        case .touchID: return "Touch ID"
-        case .faceID:  return "Face ID"
-        default:       return "Biometrics"
+        case .touchID: return  String(localized: "Touch ID")
+        case .faceID:  return  String(localized: "Face ID")
+        default:       return  String(localized: "Biometrics")
         }
     }
 
@@ -56,27 +56,27 @@ struct BiometricEnrollmentPromptView: View {
     private var heading: String {
         switch reason {
         case .firstTime:
-            return "Enable \(biometryName) to unlock faster"
+            return String(localized: "Enable \(biometryName) to unlock faster")
         case .reEnrollAfterInvalidation:
-            return "Re-enable \(biometryName)"
+            return String(localized: "Re-enable \(biometryName)")
         }
     }
 
     private var bodyText: String {
         switch reason {
         case .firstTime:
-            return "You can also enable this in Settings at any time."
+            return String(localized: "You can also enable this in Settings at any time.")
         case .reEnrollAfterInvalidation:
-            return "Your \(biometryName) settings changed — a fingerprint was added or removed. For your security, Prizm disabled \(biometryName) unlock. Would you like to re-enable it?"
+            return String(localized: "Your \(biometryName) settings changed — a fingerprint was added or removed. For your security, Bitvault disabled \(biometryName) unlock. Would you like to re-enable it?")
         }
     }
 
     private var enableButtonLabel: String {
         switch reason {
         case .firstTime:
-            return "Enable \(biometryName)"
+            return String(localized: "Enable \(biometryName)")
         case .reEnrollAfterInvalidation:
-            return "Re-enable \(biometryName)"
+            return String(localized: "Re-enable \(biometryName)")
         }
     }
 

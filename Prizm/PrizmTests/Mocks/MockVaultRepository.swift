@@ -23,6 +23,14 @@ final class MockVaultRepository: VaultRepository {
     private(set) var updateCallCount: Int = 0
     private(set) var lastUpdatedDraft: DraftVaultItem?
 
+    var archiveError: Error?
+    private(set) var archiveCalls: [(String, Bool)] = []
+
+    func setArchived(id: String, archived: Bool) async throws {
+        if let archiveError { throw archiveError }
+        archiveCalls.append((id, archived))
+    }
+
     // MARK: - VaultRepository (write side)
 
     func populate(items: [VaultItem], folders: [Folder], organizations: [Organization],
@@ -65,6 +73,8 @@ final class MockVaultRepository: VaultRepository {
             return populatedItems.filter { $0.content.matchesType(itemType) }
         case .folder(let folderId):
             return populatedItems.filter { $0.folderId == folderId }
+        case .archive:
+            return populatedItems.filter { $0.isArchived && !$0.isDeleted }
         case .trash:
             return populatedItems.filter(\.isDeleted)
         case .verificationCodes:

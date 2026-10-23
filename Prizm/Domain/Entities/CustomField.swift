@@ -56,33 +56,33 @@ nonisolated enum LinkedFieldId: Int, Equatable, Hashable {
     /// Human-readable label shown in the linked field row (e.g. "Username").
     var displayName: String {
         switch self {
-        case .loginUsername:        return "Username"
-        case .loginPassword:        return "Password"
-        case .cardCardholderName:   return "Cardholder Name"
-        case .cardExpMonth:         return "Expiration Month"
-        case .cardExpYear:          return "Expiration Year"
-        case .cardCode:             return "Security Code"
-        case .cardBrand:            return "Brand"
-        case .cardNumber:           return "Number"
-        case .identityTitle:        return "Title"
-        case .identityMiddleName:   return "Middle Name"
-        case .identityAddress1:     return "Address 1"
-        case .identityAddress2:     return "Address 2"
-        case .identityAddress3:     return "Address 3"
-        case .identityCity:         return "City"
-        case .identityState:        return "State"
-        case .identityPostalCode:   return "Postal Code"
-        case .identityCountry:      return "Country"
-        case .identityCompany:      return "Company"
-        case .identityEmail:        return "Email"
-        case .identityPhone:        return "Phone"
-        case .identitySsn:          return "SSN"
-        case .identityUsername:     return "Username"
-        case .identityPassportNumber: return "Passport Number"
-        case .identityLicenseNumber:  return "License Number"
-        case .identityFirstName:    return "First Name"
-        case .identityLastName:     return "Last Name"
-        case .identityFullName:     return "Full Name"
+        case .loginUsername:        return  String(localized: "Username")
+        case .loginPassword:        return  String(localized: "Password")
+        case .cardCardholderName:   return  String(localized: "Cardholder Name")
+        case .cardExpMonth:         return  String(localized: "Expiration Month")
+        case .cardExpYear:          return  String(localized: "Expiration Year")
+        case .cardCode:             return  String(localized: "Security Code")
+        case .cardBrand:            return  String(localized: "Brand")
+        case .cardNumber:           return  String(localized: "Number")
+        case .identityTitle:        return  String(localized: "Title")
+        case .identityMiddleName:   return  String(localized: "Middle Name")
+        case .identityAddress1:     return  String(localized: "Address 1")
+        case .identityAddress2:     return  String(localized: "Address 2")
+        case .identityAddress3:     return  String(localized: "Address 3")
+        case .identityCity:         return  String(localized: "City")
+        case .identityState:        return  String(localized: "State")
+        case .identityPostalCode:   return  String(localized: "Postal Code")
+        case .identityCountry:      return  String(localized: "Country")
+        case .identityCompany:      return  String(localized: "Company")
+        case .identityEmail:        return  String(localized: "Email")
+        case .identityPhone:        return  String(localized: "Phone")
+        case .identitySsn:          return  String(localized: "SSN")
+        case .identityUsername:     return  String(localized: "Username")
+        case .identityPassportNumber: return  String(localized: "Passport Number")
+        case .identityLicenseNumber:  return  String(localized: "License Number")
+        case .identityFirstName:    return  String(localized: "First Name")
+        case .identityLastName:     return  String(localized: "Last Name")
+        case .identityFullName:     return  String(localized: "Full Name")
         }
     }
 }

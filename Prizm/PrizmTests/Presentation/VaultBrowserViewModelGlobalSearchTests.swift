@@ -26,6 +26,7 @@ final class VaultBrowserViewModelGlobalSearchTests: XCTestCase {
         sut = VaultBrowserViewModel(
             vault:           vault,
             search:          SearchVaultUseCaseImpl(vault: vault),
+            archive:         ArchiveVaultItemUseCaseImpl(repository: vault),
             delete:          StubDeleteUseCase(),
             permanentDelete: StubPermanentDeleteUseCase(),
             restore:         StubRestoreUseCase(),
@@ -106,6 +107,24 @@ final class VaultBrowserViewModelGlobalSearchTests: XCTestCase {
         XCTAssertEqual(sut.sidebarSelection, .type(.identity))
         XCTAssertEqual(sut.searchQuery, "")
     }
+    func testArchiveActionDelegatesAndClearsAffectedSelection() async {
+        sut.itemSelection = sampleLogin
+        await sut.performArchive(id: sampleLogin.id, archived: true)
+        XCTAssertEqual(vault.archiveCalls.count, 1)
+        XCTAssertEqual(vault.archiveCalls.first?.0, sampleLogin.id)
+        XCTAssertEqual(vault.archiveCalls.first?.1, true)
+        XCTAssertNil(sut.itemSelection)
+        XCTAssertNil(sut.actionError)
+    }
+
+    func testUnarchiveFailureSurfacesErrorAndKeepsSelection() async {
+        sut.itemSelection = sampleLogin
+        vault.archiveError = VaultError.vaultLocked
+        await sut.performArchive(id: sampleLogin.id, archived: false)
+        XCTAssertEqual(sut.itemSelection, sampleLogin)
+        XCTAssertEqual(sut.actionError, VaultError.vaultLocked.localizedDescription)
+    }
+
 }
 
 // MARK: - Stub use cases (minimal, no-op)

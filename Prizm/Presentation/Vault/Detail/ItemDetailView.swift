@@ -50,6 +50,16 @@ struct ItemDetailView: View {
             ScrollView {
                 VStack(spacing: 0) {
                     if item.isDeleted { trashBanner(for: item) }
+                    else if item.isArchived {
+                        Label("This item is archived.", systemImage: "archivebox")
+                            .font(Typography.bannerText)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, Spacing.pageMargin)
+                            .padding(.vertical, Spacing.headerGap)
+                            .background(Color.secondary.opacity(Opacity.trashBanner(contrast)))
+                            .accessibilityIdentifier("archive.statusBanner")
+                    }
 
                     itemHeader(for: item)
                     typeDetailView(for: item)
@@ -117,7 +127,7 @@ struct ItemDetailView: View {
     private func organizationRow(for item: VaultItem) -> some View {
         if let orgId = item.organizationId,
            let org = organizations.first(where: { $0.id == orgId }) {
-            DetailSectionCard("Organization") {
+            DetailSectionCard(String(localized: "Organization")) {
                 FieldRowView(label: "", value: org.name, itemId: item.id)
             }
         }
@@ -127,7 +137,7 @@ struct ItemDetailView: View {
     private func folderRow(for item: VaultItem) -> some View {
         if let folderId = item.folderId,
            let folder = folders.first(where: { $0.id == folderId }) {
-            DetailSectionCard("Folder") {
+            DetailSectionCard(String(localized: "Folder")) {
                 FieldRowView(label: "", value: folder.name, itemId: item.id)
             }
         }

@@ -1,5 +1,12 @@
 import SwiftUI
 
+enum EditorLayout {
+    /// Enough space to edit several paragraphs before the editor needs to scroll.
+    static let minimumNoteHeight: CGFloat = 240
+    static let noteSheetWidth: CGFloat = 640
+    static let noteSheetHeight: CGFloat = 640
+}
+
 // MARK: - Typography
 //
 // All font roles for the Prizm Presentation layer.

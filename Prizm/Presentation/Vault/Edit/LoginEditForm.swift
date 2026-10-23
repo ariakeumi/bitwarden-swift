@@ -15,13 +15,13 @@ struct LoginEditForm: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
 
-                DetailSectionCard("Credentials") {
+                DetailSectionCard(String(localized: "Credentials")) {
                     OptionalEditFieldRow(label: "Username", value: $draft.username)
                     Divider()
                     MaskedEditFieldRow(label: "Password", value: $draft.password, generatorBinding: $draft.password)
                 }
 
-                DetailSectionCard("Websites") {
+                DetailSectionCard(String(localized: "Websites")) {
                     ForEach(draft.uris) { uri in
                         if let index = draft.uris.firstIndex(where: { $0.id == uri.id }) {
                             if index > 0 { Divider() }
@@ -58,7 +58,7 @@ struct LoginEditForm: View {
                     .padding(.horizontal, Spacing.rowHorizontal)
                 }
 
-                DetailSectionCard("Notes") {
+                DetailSectionCard(String(localized: "Notes")) {
                     OptionalEditFieldRow(label: "Notes", value: $draft.notes)
                 }
 
@@ -161,12 +161,12 @@ private extension URIMatchType {
 
     var displayName: String {
         switch self {
-        case .domain:            return "Domain"
-        case .host:              return "Host"
-        case .startsWith:        return "Starts With"
-        case .exact:             return "Exact"
-        case .regularExpression: return "Regular Expression"
-        case .never:             return "Never"
+        case .domain:            return  String(localized: "Domain")
+        case .host:              return  String(localized: "Host")
+        case .startsWith:        return  String(localized: "Starts With")
+        case .exact:             return  String(localized: "Exact")
+        case .regularExpression: return  String(localized: "Regular Expression")
+        case .never:             return  String(localized: "Never")
         }
     }
 }

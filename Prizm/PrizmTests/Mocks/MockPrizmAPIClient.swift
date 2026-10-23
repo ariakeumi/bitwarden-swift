@@ -41,6 +41,17 @@ actor MockPrizmAPIClient: PrizmAPIClientProtocol {
     nonisolated(unsafe) var updateCipherCallCount: Int = 0
     nonisolated(unsafe) var lastUpdatedCipherId: String?
 
+    nonisolated(unsafe) var archiveResponse: RawCipher?
+    nonisolated(unsafe) var archiveError: Error?
+    nonisolated(unsafe) var archiveCalls: [(String, Bool)] = []
+
+    func setCipherArchived(id: String, archived: Bool) async throws -> RawCipher {
+        archiveCalls.append((id, archived))
+        if let archiveError { throw archiveError }
+        guard let archiveResponse else { throw APIError.decodingFailed }
+        return archiveResponse
+    }
+
     // MARK: - Protocol conformance
 
     func setBaseURL(_ url: URL) {

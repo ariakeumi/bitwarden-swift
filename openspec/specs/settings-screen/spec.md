@@ -6,6 +6,39 @@ detection, and enable/disable behavior are owned by `biometric-unlock`.
 
 ## Requirements
 
+### Requirement: Configurable vault lock boundary
+Settings → Security SHALL always display a Lock Vault picker with Never, On restart,
+and On reopen. On reopen SHALL be the default. The choice SHALL persist locally.
+
+#### Scenario: Never
+- **WHEN** the vault has been unlocked and Never is selected
+- **THEN** app and computer restarts SHALL restore that session without another unlock
+
+#### Scenario: On restart
+- **WHEN** On restart is selected
+- **THEN** app restarts within the same computer boot SHALL restore the unlocked session
+- **AND** a computer restart SHALL require explicit unlock
+
+#### Scenario: On reopen
+- **WHEN** On reopen is selected
+- **THEN** quitting and relaunching the app SHALL require explicit unlock
+- **AND** merely closing a window SHALL NOT lock the vault
+
+#### Scenario: Manual lock and sign-out
+- **WHEN** the user manually locks the vault or signs out, under any policy
+- **THEN** automatic restoration SHALL be revoked before retained key deletion
+- **AND** a subsequent launch SHALL require explicit unlock or sign-in
+
+#### Scenario: Unavailable retained session
+- **WHEN** retained keys are missing, invalid, revoked, or expired
+- **THEN** startup SHALL fall back to the normal unlock screen
+
+#### Scenario: Sleep and screen lock
+- **WHEN** the Mac sleeps, starts a screensaver, or locks its screen
+- **THEN** the app SHALL preserve the selected restart/reopen boundary
+
+---
+
 ### Requirement: Settings window opens via ⌘, and gear toolbar button
 The system SHALL provide a macOS Settings window using the SwiftUI `Settings` scene, accessible via ⌘, (standard macOS keyboard shortcut) and via a gear icon button in the vault browser toolbar placed next to the search field. The Settings window SHALL open as a separate native macOS window.
 
@@ -38,10 +71,11 @@ The Settings window SHALL display a Security section containing the biometric un
 - **WHEN** biometric unlock is enabled
 - **THEN** the toggle SHALL be on; when disabled the toggle SHALL be off
 
-#### Scenario: Biometric toggle is hidden when device has no biometrics
-- **GIVEN** the device does not support biometric authentication
+#### Scenario: Settings explains unavailable biometrics
+- **GIVEN** biometric authentication is unavailable (including unsupported hardware or missing enrollment)
 - **WHEN** the user opens the Settings window
-- **THEN** the Security section and biometric toggle SHALL NOT be shown
+- **THEN** the Security section SHALL remain visible with an explanation that biometric unlock is currently unavailable and that the master password can still be used
+- **AND** the biometric toggle SHALL NOT be shown
 
 ---
 

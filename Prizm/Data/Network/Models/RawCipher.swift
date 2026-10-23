@@ -26,6 +26,7 @@ nonisolated struct RawCipher: Codable {
     /// protection for items that have it enabled.
     /// Reference: Bitwarden server `CipherRepromptType` enum (0 = None, 1 = Password).
     let reprompt:       Int?
+    let archivedDate:   String?         // ISO-8601 UTC, nil if not archived
     let deletedDate:    String?         // ISO-8601 UTC, nil if not deleted
     let creationDate:   String?         // ISO-8601 UTC
     let revisionDate:   String?         // ISO-8601 UTC
@@ -59,6 +60,7 @@ nonisolated struct RawCipher: Codable {
         notes          = try c.decodeIfPresent(String.self,       forKey: .notes)
         favorite       = try c.decode(Bool.self,                  forKey: .favorite)
         reprompt       = try c.decodeIfPresent(Int.self,          forKey: .reprompt)
+        archivedDate   = try c.decodeIfPresent(String.self,       forKey: .archivedDate)
         deletedDate    = try c.decodeIfPresent(String.self,       forKey: .deletedDate)
         creationDate   = try c.decodeIfPresent(String.self,       forKey: .creationDate)
         revisionDate   = try c.decodeIfPresent(String.self,       forKey: .revisionDate)
@@ -81,7 +83,7 @@ nonisolated struct RawCipher: Codable {
          creationDate: String?, revisionDate: String?, login: RawLoginData?,
          card: RawCardData?, identity: RawIdentityData?, secureNote: RawSecureNoteData?,
          sshKey: RawSSHKeyData?, fields: [RawField]?, key: String?,
-         collectionIds: [String] = [], attachments: [AttachmentDTO]?) {
+         collectionIds: [String] = [], attachments: [AttachmentDTO]?, archivedDate: String? = nil) {
         self.id             = id
         self.organizationId = organizationId
         self.folderId       = folderId
@@ -91,6 +93,7 @@ nonisolated struct RawCipher: Codable {
         self.favorite       = favorite
         self.reprompt       = reprompt
         self.deletedDate    = deletedDate
+        self.archivedDate   = archivedDate
         self.creationDate   = creationDate
         self.revisionDate   = revisionDate
         self.login          = login

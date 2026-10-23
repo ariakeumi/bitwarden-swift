@@ -19,11 +19,11 @@ struct SSHKeyDetailView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
 
-                DetailSectionCard("Key") {
+                DetailSectionCard(String(localized: "Key")) {
                     // Public key — visible
                     if let publicKey = sshKey.publicKey {
                         FieldRowView(
-                            label:  "Public Key",
+                            label:  String(localized: "Public Key"),
                             value:  publicKey,
                             itemId: item.id,
                             onCopy: onCopy
@@ -35,7 +35,7 @@ struct SSHKeyDetailView: View {
                     let hasFingerprint = sshKey.keyFingerprint?.isEmpty == false
                     let fingerprint = hasFingerprint ? sshKey.keyFingerprint! : "[No fingerprint]"
                     FieldRowView(
-                        label:  "Fingerprint",
+                        label:  String(localized: "Fingerprint"),
                         value:  fingerprint,
                         itemId: item.id,
                         onCopy: hasFingerprint ? onCopy : { _ in }
@@ -48,7 +48,7 @@ struct SSHKeyDetailView: View {
                     if let privateKey = sshKey.privateKey {
                         Divider()
                         FieldRowView(
-                            label:    "Private Key",
+                            label:    String(localized: "Private Key"),
                             value:    privateKey,
                             itemId:   item.id,
                             isMasked: true,
@@ -58,13 +58,13 @@ struct SSHKeyDetailView: View {
                 }
 
                 if let notes = sshKey.notes, !notes.isEmpty {
-                    DetailSectionCard("Notes") {
-                        FieldRowView(label: "", value: notes, itemId: item.id, isMultiLine: true, onCopy: onCopy)
+                    DetailSectionCard(String(localized: "Notes")) {
+                        FieldRowView(label: String(localized: ""), value: notes, itemId: item.id, isMultiLine: true, onCopy: onCopy)
                     }
                 }
 
                 if !sshKey.customFields.isEmpty {
-                    DetailSectionCard("Custom Fields") {
+                    DetailSectionCard(String(localized: "Custom Fields")) {
                         CustomFieldsSection(fields: sshKey.customFields, itemId: item.id, onCopy: onCopy)
                     }
                 }

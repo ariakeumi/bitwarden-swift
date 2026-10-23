@@ -72,6 +72,14 @@ protocol AuthRepository: AnyObject {
     /// Does NOT clear Keychain tokens — session survives lock/unlock.
     func lockVault() async
 
+    /// Automatic lock boundary. Manual lock and sign-out always revoke restoration.
+    var vaultLockPolicy: VaultLockPolicy { get }
+    func setVaultLockPolicy(_ policy: VaultLockPolicy) async throws
+
+    /// Restores a previously unlocked session only when the selected policy allows it.
+    /// Returns nil when another explicit unlock is required.
+    func restoreUnlockedSession() async throws -> Account?
+
     // MARK: - Biometric unlock
 
     /// Whether the device hardware supports biometric authentication, regardless of the
@@ -98,6 +106,12 @@ protocol AuthRepository: AnyObject {
 }
 
 // MARK: - Supporting types
+
+nonisolated enum VaultLockPolicy: String, CaseIterable {
+    case never
+    case onRestart
+    case onReopen
+}
 
 nonisolated enum LoginResult {
     case success(Account)
@@ -126,30 +140,33 @@ nonisolated enum AuthError: Error, LocalizedError, Equatable {
     case biometricItemNotFound
     /// Biometric unlock cannot be enabled — vault is locked (keys not in memory).
     case biometricUnavailable
+    case sessionRetentionFailed
 
     var errorDescription: String? {
         switch self {
         case .invalidCredentials:
-            return "Invalid email or master password. Check your email and master password."
+            return String(localized: "Invalid email or master password. Check your email and master password.")
         case .invalidTwoFactorCode:
-            return "Invalid two-factor code. Please try again."
+            return String(localized: "Invalid two-factor code. Please try again.")
         case .invalidURL:
-            return "Invalid server URL. Make sure to include https://."
+            return String(localized: "Invalid server URL. Make sure to include https://.")
         case .serverUnreachable:
-            return "Cannot reach the server. Verify the URL and check your connection."
+            return String(localized: "Cannot reach the server. Verify the URL and check your connection.")
         case .unrecognizedServer:
-            return "This server doesn't appear to be a Bitwarden instance."
+            return String(localized: "This server doesn't appear to be a Bitwarden instance.")
         case .networkUnavailable:
-            return "No internet connection. Check your network connection."
+            return String(localized: "No internet connection. Check your network connection.")
         case .unsupported2FAMethod(let name):
-            return "Two-factor method '\(name)' is not supported. Use an authenticator app."
+            return String(localized: "Two-factor method '\(name)' is not supported. Use an authenticator app.")
         case .biometricInvalidated:
-            return "Your Touch ID settings have changed. Please enter your master password to continue."
+            return String(localized: "Your Touch ID settings have changed. Please enter your master password to continue.")
         case .biometricItemNotFound:
             // Intentionally nil — this error is handled silently in UnlockViewModel.
             return nil
         case .biometricUnavailable:
-            return "Biometric unlock is not available. Please unlock with your master password."
+            return String(localized: "Biometric unlock is not available. Please unlock with your master password.")
+        case .sessionRetentionFailed:
+            return String(localized: "Could not save the vault lock setting. Please try again.")
         }
     }
 }

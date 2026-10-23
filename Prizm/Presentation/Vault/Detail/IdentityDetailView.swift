@@ -38,59 +38,59 @@ struct IdentityDetailView: View {
         VStack(alignment: .leading, spacing: 0) {
 
                 if hasPersonalInfo {
-                    DetailSectionCard("Personal Info") {
+                    DetailSectionCard(String(localized: "Personal Info")) {
                         fieldRows([
-                            ("Title",       identity.title),
-                            ("First Name",  identity.firstName),
-                            ("Middle Name", identity.middleName),
-                            ("Last Name",   identity.lastName),
-                            ("Company",     identity.company),
+                            (String(localized: "Title"),       identity.title),
+                            (String(localized: "First Name"),  identity.firstName),
+                            (String(localized: "Middle Name"), identity.middleName),
+                            (String(localized: "Last Name"),   identity.lastName),
+                            (String(localized: "Company"),     identity.company),
                         ])
                     }
                 }
 
                 if hasIDNumbers {
-                    DetailSectionCard("ID Numbers") {
+                    DetailSectionCard(String(localized: "ID Numbers")) {
                         fieldRows([
-                            ("SSN",             identity.ssn),
-                            ("Passport Number", identity.passportNumber),
-                            ("License Number",  identity.licenseNumber),
+                            (String(localized: "SSN"),             identity.ssn),
+                            (String(localized: "Passport Number"), identity.passportNumber),
+                            (String(localized: "License Number"),  identity.licenseNumber),
                         ])
                     }
                 }
 
                 if hasContact {
-                    DetailSectionCard("Contact") {
+                    DetailSectionCard(String(localized: "Contact")) {
                         fieldRows([
-                            ("Email",    identity.email),
-                            ("Phone",    identity.phone),
-                            ("Username", identity.username),
+                            (String(localized: "Email"),    identity.email),
+                            (String(localized: "Phone"),    identity.phone),
+                            (String(localized: "Username"), identity.username),
                         ])
                     }
                 }
 
                 if hasAddress {
-                    DetailSectionCard("Address") {
+                    DetailSectionCard(String(localized: "Address")) {
                         fieldRows([
-                            ("Address 1",    identity.address1),
-                            ("Address 2",    identity.address2),
-                            ("Address 3",    identity.address3),
-                            ("City",         identity.city),
-                            ("State",        identity.state),
-                            ("Postal Code",  identity.postalCode),
-                            ("Country",      identity.country),
+                            (String(localized: "Address 1"),    identity.address1),
+                            (String(localized: "Address 2"),    identity.address2),
+                            (String(localized: "Address 3"),    identity.address3),
+                            (String(localized: "City"),         identity.city),
+                            (String(localized: "State"),        identity.state),
+                            (String(localized: "Postal Code"),  identity.postalCode),
+                            (String(localized: "Country"),      identity.country),
                         ])
                     }
                 }
 
                 if let notes = identity.notes, !notes.isEmpty {
-                    DetailSectionCard("Notes") {
+                    DetailSectionCard(String(localized: "Notes")) {
                         FieldRowView(label: "", value: notes, itemId: item.id, isMultiLine: true, onCopy: onCopy)
                     }
                 }
 
                 if !identity.customFields.isEmpty {
-                    DetailSectionCard("Custom Fields") {
+                    DetailSectionCard(String(localized: "Custom Fields")) {
                         CustomFieldsSection(fields: identity.customFields, itemId: item.id, onCopy: onCopy)
                     }
                 }

@@ -8,6 +8,9 @@ nonisolated struct VaultItem: Identifiable, Equatable, Hashable {
     let name: String
     let isFavorite: Bool
     let isDeleted: Bool
+    /// Server archive timestamp, preserved verbatim across edits and cache updates.
+    let archivedDate: String?
+    var isArchived: Bool { archivedDate != nil }
     let creationDate: Date
     let revisionDate: Date
     let content: ItemContent
@@ -36,13 +39,15 @@ nonisolated struct VaultItem: Identifiable, Equatable, Hashable {
         attachments: [Attachment] = [],
         folderId: String? = nil,
         organizationId: String? = nil,
-        collectionIds: [String] = []
+        collectionIds: [String] = [],
+        archivedDate: String? = nil
     ) {
         self.id = id
         self.folderId = folderId
         self.name = name
         self.isFavorite = isFavorite
         self.isDeleted = isDeleted
+        self.archivedDate = archivedDate
         self.creationDate = creationDate
         self.revisionDate = revisionDate
         self.content = content

@@ -65,10 +65,10 @@ actor VaultRepositoryImpl: VaultRepository {
         // Pre-populate static keys with zero counts so itemCounts() returns 0 (not nil)
         // before the first populate() / buildIndexes() call (e.g. empty-vault tests).
         var bySelection: [SidebarSelection: [VaultItem]] = [
-            .allItems: [], .favorites: [], .trash: []
+            .allItems: [], .favorites: [], .trash: [], .archive: []
         ]
         var counts: [SidebarSelection: Int] = [
-            .allItems: 0, .favorites: 0, .trash: 0
+            .allItems: 0, .favorites: 0, .trash: 0, .archive: 0
         ]
         for type in ItemType.allCases {
             bySelection[.type(type)] = []
@@ -108,7 +108,7 @@ actor VaultRepositoryImpl: VaultRepository {
 
     private func buildIndexes() {
         // Local staging variable — not stored; _bySelection[.allItems] serves the same role.
-        let active = items.filter { !$0.isDeleted }
+        let active = items.filter { !$0.isDeleted && !$0.isArchived }
 
         // Build org-collection map first: used by both _bySelection and _counts.
         var orgColIds: [String: Set<String>] = [:]
@@ -122,7 +122,8 @@ actor VaultRepositoryImpl: VaultRepository {
         bySelection[.allItems]  = sorted(active)
         bySelection[.favorites] = sorted(active.filter(\.isFavorite))
         bySelection[.trash]     = sorted(items.filter(\.isDeleted))
-        // Verification Codes: every non-trashed Login with a non-blank seed. Whether the seed is
+        bySelection[.archive]   = sorted(items.filter { $0.isArchived && !$0.isDeleted })
+        // Verification Codes: every active Login with a non-blank seed. Whether the seed is
         // *usable* is decided at display time, so items with bad seeds still appear (as
         // "unavailable") and the user can see they exist.
         bySelection[.verificationCodes] = sorted(active.filter(\.hasTOTPSeed))
@@ -164,6 +165,7 @@ actor VaultRepositoryImpl: VaultRepository {
         counts[.allItems]  = bySelection[.allItems]?.count  ?? 0
         counts[.favorites] = bySelection[.favorites]?.count ?? 0
         counts[.trash]     = bySelection[.trash]?.count     ?? 0
+        counts[.archive]   = bySelection[.archive]?.count   ?? 0
         counts[.verificationCodes] = bySelection[.verificationCodes]?.count ?? 0
         for type in ItemType.allCases {
             counts[.type(type)] = bySelection[.type(type)]?.count ?? 0
@@ -298,7 +300,8 @@ actor VaultRepositoryImpl: VaultRepository {
                 creationDate: updatedItem.creationDate, revisionDate: updatedItem.revisionDate,
                 content: updatedItem.content, reprompt: updatedItem.reprompt,
                 attachments: updatedItem.attachments, folderId: updatedItem.folderId,
-                organizationId: updatedItem.organizationId, collectionIds: draft.collectionIds
+                organizationId: updatedItem.organizationId, collectionIds: draft.collectionIds,
+                archivedDate: updatedItem.archivedDate
             )
         }
 
@@ -347,6 +350,35 @@ actor VaultRepositoryImpl: VaultRepository {
         return createdItem
     }
 
+    // MARK: - Archive
+
+    func setArchived(id: String, archived: Bool) async throws {
+        guard let existing = items.first(where: { $0.id == id }), !existing.isDeleted else {
+            throw VaultError.itemNotFound(id)
+        }
+        let keys: CryptoKeys
+        do {
+            keys = try await crypto.currentKeys()
+        } catch PrizmCryptoServiceError.vaultLocked {
+            throw VaultError.vaultLocked
+        }
+        let orgKeys = await orgKeyCache.snapshot()
+        let raw = try await apiClient.setCipherArchived(id: id, archived: archived)
+        guard raw.id == id, (raw.archivedDate != nil) == archived else {
+            throw APIError.decodingFailed
+        }
+        let (updated, _) = try mapper.map(raw: raw, vaultKeys: keys, orgKeys: orgKeys)
+        // The actor can be re-entered while the request runs. Never repopulate a locked vault
+        // or use an array index captured before a sync, deletion or lock.
+        guard await crypto.isUnlocked else { throw VaultError.vaultLocked }
+        guard let index = items.firstIndex(where: { $0.id == id }), !items[index].isDeleted else {
+            throw VaultError.itemNotFound(id)
+        }
+        items[index] = updated
+        buildIndexes()
+        logger.info("Vault item archive state changed: \(id, privacy: .public) archived=\(archived)")
+    }
+
     // MARK: - Delete / Restore / Empty Trash
 
     /// Soft-deletes the active item with `id` by calling `PUT /ciphers/{id}/delete`.
@@ -362,7 +394,8 @@ actor VaultRepositoryImpl: VaultRepository {
             id: old.id, name: old.name, isFavorite: old.isFavorite, isDeleted: true,
             creationDate: old.creationDate, revisionDate: old.revisionDate,
             content: old.content, reprompt: old.reprompt, attachments: old.attachments,
-            folderId: old.folderId, organizationId: old.organizationId, collectionIds: old.collectionIds
+            folderId: old.folderId, organizationId: old.organizationId, collectionIds: old.collectionIds,
+            archivedDate: old.archivedDate
         )
         buildIndexes()
         logger.info("Vault item soft-deleted: \(id, privacy: .public)")
@@ -391,7 +424,8 @@ actor VaultRepositoryImpl: VaultRepository {
             id: old.id, name: old.name, isFavorite: old.isFavorite, isDeleted: false,
             creationDate: old.creationDate, revisionDate: old.revisionDate,
             content: old.content, reprompt: old.reprompt, attachments: old.attachments,
-            folderId: old.folderId, organizationId: old.organizationId, collectionIds: old.collectionIds
+            folderId: old.folderId, organizationId: old.organizationId, collectionIds: old.collectionIds,
+            archivedDate: old.archivedDate
         )
         buildIndexes()
         logger.info("Vault item restored: \(id, privacy: .public)")
@@ -411,7 +445,8 @@ actor VaultRepositoryImpl: VaultRepository {
             id: old.id, name: old.name, isFavorite: old.isFavorite, isDeleted: old.isDeleted,
             creationDate: old.creationDate, revisionDate: old.revisionDate,
             content: old.content, reprompt: old.reprompt, attachments: attachments,
-            folderId: old.folderId, organizationId: old.organizationId, collectionIds: old.collectionIds
+            folderId: old.folderId, organizationId: old.organizationId, collectionIds: old.collectionIds,
+            archivedDate: old.archivedDate
         )
         buildIndexes()
         logger.info("Vault item attachments updated: cipher=\(cipherId, privacy: .public) count=\(attachments.count, privacy: .public)")
@@ -454,7 +489,9 @@ actor VaultRepositoryImpl: VaultRepository {
             items[i] = VaultItem(
                 id: old.id, name: old.name, isFavorite: old.isFavorite, isDeleted: old.isDeleted,
                 creationDate: old.creationDate, revisionDate: old.revisionDate,
-                content: old.content, reprompt: old.reprompt, attachments: old.attachments, folderId: nil
+                content: old.content, reprompt: old.reprompt, attachments: old.attachments, folderId: nil,
+                organizationId: old.organizationId, collectionIds: old.collectionIds,
+                archivedDate: old.archivedDate
             )
         }
         buildIndexes()
@@ -517,7 +554,9 @@ actor VaultRepositoryImpl: VaultRepository {
         items[idx] = VaultItem(
             id: old.id, name: old.name, isFavorite: old.isFavorite, isDeleted: old.isDeleted,
             creationDate: old.creationDate, revisionDate: old.revisionDate,
-            content: old.content, reprompt: old.reprompt, attachments: old.attachments, folderId: folderId
+            content: old.content, reprompt: old.reprompt, attachments: old.attachments, folderId: folderId,
+            organizationId: old.organizationId, collectionIds: old.collectionIds,
+            archivedDate: old.archivedDate
         )
         buildIndexes()
         logger.info("Item moved to folder: \(itemId, privacy: .public)")
@@ -530,7 +569,9 @@ actor VaultRepositoryImpl: VaultRepository {
             items[i] = VaultItem(
                 id: old.id, name: old.name, isFavorite: old.isFavorite, isDeleted: old.isDeleted,
                 creationDate: old.creationDate, revisionDate: old.revisionDate,
-                content: old.content, reprompt: old.reprompt, attachments: old.attachments, folderId: folderId
+                content: old.content, reprompt: old.reprompt, attachments: old.attachments, folderId: folderId,
+                organizationId: old.organizationId, collectionIds: old.collectionIds,
+                archivedDate: old.archivedDate
             )
         }
         buildIndexes()

@@ -150,7 +150,8 @@ nonisolated final class CipherMapper: Sendable {
             attachments:    attachments,
             folderId:       raw.folderId,
             organizationId: raw.organizationId,
-            collectionIds:  raw.collectionIds
+            collectionIds:  raw.collectionIds,
+            archivedDate:   raw.archivedDate
         )
         return (item: item, cipherKey: cipherKey)
     }
@@ -378,7 +379,8 @@ nonisolated final class CipherMapper: Sendable {
             fields:         encFields.isEmpty ? nil : encFields,
             key:            nil,
             collectionIds:  draft.collectionIds,
-            attachments:    nil
+            attachments:    nil,
+            archivedDate:   draft.archivedDate
         )
     }
 

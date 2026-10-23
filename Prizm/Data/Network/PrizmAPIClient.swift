@@ -28,8 +28,12 @@ protocol PrizmAPIClientProtocol: Actor {
     ///   be read from a heap dump after the session ends (Constitution §III).
     func clearAccessToken()
 
-    /// POST `/accounts/prelogin` — returns KDF parameters for the given email.
-    /// Used to derive the master key before posting credentials to `/connect/token`.
+    /// POST `/identity/accounts/prelogin` — returns KDF parameters for the given email.
+    /// Used to derive the master key before posting credentials to `/identity/connect/token`.
+    ///
+    /// The endpoint lives under the identity service, not the api service — older
+    /// Bitwarden servers kept a legacy `/api/accounts/prelogin` alias that current
+    /// Vaultwarden releases no longer serve.
     ///
     /// No authentication required; sends only the email address.
     func preLogin(email: String) async throws -> PreLoginResponse
@@ -72,8 +76,8 @@ protocol PrizmAPIClientProtocol: Actor {
     /// PUT `/api/ciphers/{id}` — updates an existing cipher with re-encrypted field values.
     ///
     /// Requires a valid `Authorization: Bearer <accessToken>` header.
-    /// The request body is a JSON-encoded `RawCipher` with all sensitive fields re-encrypted
-    /// as EncStrings (type-2 AES-256-CBC + HMAC-SHA256).
+    /// The body includes the current user's `encryptedFor` and the `RawCipher` fields,
+    /// with sensitive values re-encrypted as EncStrings (type-2 AES-256-CBC + HMAC-SHA256).
     /// On success the server returns the updated cipher, which is decoded back into `RawCipher`.
     ///
     /// Reference: Bitwarden Server API PUT /api/ciphers/{id}
@@ -108,17 +112,18 @@ protocol PrizmAPIClientProtocol: Actor {
     /// Reference: Bitwarden Server API DELETE /api/ciphers/{id}
     func permanentDeleteCipher(id: String) async throws
 
-    /// PUT `/api/ciphers/{id}/restore` — restores a trashed cipher to the active vault.
-    ///
-    /// Clears `deletedDate` on the server. The item becomes visible in the active vault again.
-    ///
-    /// Reference: Bitwarden Server API PUT /api/ciphers/{id}/restore
+    /// PUT `/api/ciphers/{id}/archive` or `/unarchive`; returns server-confirmed metadata.
+    /// Reference: https://github.com/bitwarden/server/blob/main/src/Api/Vault/Controllers/CiphersController.cs
+    func setCipherArchived(id: String, archived: Bool) async throws -> RawCipher
+
+    /// PUT `/api/ciphers/{id}/restore` — restores a trashed cipher, preserving archive state.
     func restoreCipher(id: String) async throws
 
     /// POST `/api/ciphers` — creates a new cipher with encrypted field values.
     ///
     /// Requires a valid `Authorization: Bearer <accessToken>` header.
-    /// The request body is a JSON-encoded `RawCipher`. The server assigns the ID and timestamps.
+    /// The body includes the current user's `encryptedFor` and the `RawCipher` fields.
+    /// The server assigns the ID and timestamps.
     /// On success the server returns the created cipher, decoded back into `RawCipher`.
     func createCipher(cipher: RawCipher) async throws -> RawCipher
 
@@ -304,17 +309,22 @@ nonisolated enum APIError: Error, Equatable {
     case decodingFailed
     /// `setBaseURL` was never called before making a request.
     case baseURLNotSet
+    /// A cipher write requires the user identity from the current access token.
+    case authenticatedUserUnavailable
 }
 
 extension APIError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .httpError(let statusCode, let body):
-            return body.isEmpty ? "Server error \(statusCode)." : "Server error \(statusCode): \(body)"
+            return body.isEmpty ? String(localized: "Server error \(statusCode).")
+                       : String(localized: "Server error \(statusCode): \(body)")
         case .decodingFailed:
             return "The server response could not be read. Please try again."
         case .baseURLNotSet:
             return "No server URL is configured."
+        case .authenticatedUserUnavailable:
+            return String(localized: "Your sign-in session could not be read. Please sign in again.")
         }
     }
 }
@@ -417,7 +427,7 @@ actor PrizmAPIClientImpl: PrizmAPIClientProtocol {
 
     func preLogin(email: String) async throws -> PreLoginResponse {
         guard let base = baseURL else { throw APIError.baseURLNotSet }
-        let url = base.appendingPathComponent("api/accounts/prelogin")
+        let url = base.appendingPathComponent("identity/accounts/prelogin")
 
         if DebugConfig.isEnabled {
             logger.debug("[debug] preLogin → POST \(url.absoluteString, privacy: .public)")
@@ -628,9 +638,7 @@ actor PrizmAPIClientImpl: PrizmAPIClientProtocol {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
 
-        // Encode the re-encrypted RawCipher as the request body.
-        // Field values are already EncStrings — no plaintext leaves the device.
-        request.httpBody = try JSONEncoder().encode(cipher)
+        request.httpBody = try JSONEncoder().encode(cipherWriteRequest(cipher))
 
         let updated: RawCipher = try await perform(request: request)
         if DebugConfig.isEnabled {
@@ -699,6 +707,21 @@ actor PrizmAPIClientImpl: PrizmAPIClientProtocol {
         if DebugConfig.isEnabled {
             logger.debug("[debug] permanentDeleteCipher ← ok id=\(id, privacy: .public)")
         }
+    }
+
+    // MARK: - Archive
+
+    func setCipherArchived(id: String, archived: Bool) async throws -> RawCipher {
+        guard let base = baseURL else { throw APIError.baseURLNotSet }
+        let action = archived ? "archive" : "unarchive"
+        let url = base.appendingPathComponent("api/ciphers/\(id)/\(action)")
+        var request = baseRequest(url: url)
+        request.httpMethod = "PUT"
+        if let token = accessToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        // Only the ID is transmitted; encrypted fields and key material stay on the device.
+        return try await perform(request: request)
     }
 
     // MARK: - restoreCipher
@@ -832,7 +855,7 @@ actor PrizmAPIClientImpl: PrizmAPIClientProtocol {
         if let token = accessToken {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
-        request.httpBody = try JSONEncoder().encode(cipher)
+        request.httpBody = try JSONEncoder().encode(cipherWriteRequest(cipher))
 
         let created: RawCipher = try await perform(request: request)
         if DebugConfig.isEnabled {
@@ -845,7 +868,7 @@ actor PrizmAPIClientImpl: PrizmAPIClientProtocol {
 
     /// Wrapper body for `POST /api/ciphers/create` — Bitwarden expects `{ "cipher": ..., "collectionIds": [...] }`.
     private struct OrgCipherCreateRequest: Encodable {
-        let cipher: RawCipher
+        let cipher: CipherWriteRequest
         let collectionIds: [String]
     }
 
@@ -863,7 +886,7 @@ actor PrizmAPIClientImpl: PrizmAPIClientProtocol {
         if let token = accessToken {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
-        let body = OrgCipherCreateRequest(cipher: cipher, collectionIds: cipher.collectionIds)
+        let body = OrgCipherCreateRequest(cipher: try cipherWriteRequest(cipher), collectionIds: cipher.collectionIds)
         request.httpBody = try JSONEncoder().encode(body)
 
         let created: RawCipher = try await perform(request: request)
@@ -1019,6 +1042,45 @@ actor PrizmAPIClientImpl: PrizmAPIClientProtocol {
     }
 
     // MARK: - Private helpers
+
+    /// Adds write-only identity metadata without changing the encrypted sync/response model.
+    /// Vaultwarden requires encryptedFor on both personal and organization cipher writes.
+    /// Reference: https://github.com/dani-garcia/vaultwarden/blob/7c188967/src/api/core/ciphers.rs#L252
+    private struct CipherWriteRequest: Encodable {
+        let cipher: RawCipher
+        let encryptedFor: String
+
+        func encode(to encoder: any Encoder) throws {
+            try cipher.encode(to: encoder)
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(encryptedFor, forKey: .encryptedFor)
+        }
+
+        private enum CodingKeys: String, CodingKey { case encryptedFor }
+    }
+
+    /// Reads sub from the same bearer token used by this request (RFC 7519 §4.1.2).
+    /// The token comes from the configured server over HTTPS; decoding is metadata
+    /// extraction, not local authorization. The server verifies the signature and
+    /// checks encryptedFor against the authenticated user. No token or claims are logged.
+    /// Deriving it per request avoids retaining another account's identity after a
+    /// token refresh, account switch, or sign-out.
+    private func cipherWriteRequest(_ cipher: RawCipher) throws -> CipherWriteRequest {
+        struct Subject: Decodable { let sub: String }
+        let parts = accessToken?.split(separator: ".", omittingEmptySubsequences: false) ?? []
+        if parts.count == 3 {
+            var payload = String(parts[1]).replacingOccurrences(of: "-", with: "+")
+                .replacingOccurrences(of: "_", with: "/")
+            payload += String(repeating: "=", count: (4 - payload.count % 4) % 4)
+            if let data = Data(base64Encoded: payload),
+               let subject = try? JSONDecoder().decode(Subject.self, from: data),
+               !subject.sub.isEmpty {
+                return CipherWriteRequest(cipher: cipher, encryptedFor: subject.sub)
+            }
+        }
+        logger.error("Cipher write blocked: access token has no user identity")
+        throw APIError.authenticatedUserUnavailable
+    }
 
     /// Builds a `URLRequest` pre-loaded with mandatory Bitwarden client identification headers.
     private func baseRequest(url: URL) -> URLRequest {

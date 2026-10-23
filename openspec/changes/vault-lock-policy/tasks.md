@@ -1,0 +1,5 @@
+- [x] Test persistence, boot binding, revocation, corrupt sessions and default policy.
+- [x] Implement Domain policy and Keychain-backed restoration.
+- [x] Connect launch restoration and replace automatic sleep/screen lock triggers.
+- [x] Add localized picker, explanations and failure feedback.
+- [x] Build and run focused auth/root regression tests.

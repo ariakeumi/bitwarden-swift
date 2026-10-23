@@ -36,7 +36,7 @@ struct AttachmentsSectionView: View {
     @State private var isDragTargeted = false
 
     var body: some View {
-        DetailSectionCard("Attachments") {
+        DetailSectionCard(String(localized: "Attachments")) {
             VStack(alignment: .leading, spacing: 0) {
                 if attachments.isEmpty {
                     emptyState

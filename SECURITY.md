@@ -21,8 +21,8 @@ of the issue, steps to reproduce, and any relevant log output or proof of concep
 
 ### Data at rest
 
-No vault data is ever written to disk in plaintext. The only sensitive material
-persisted on disk is the **encrypted user key**, stored in the macOS Keychain under
+Vault items are never written to disk in plaintext. Session credentials and the
+**encrypted user key** are stored in the macOS Keychain under
 `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` — accessible only when the Mac is
 unlocked and only on this specific device, excluded from iCloud Keychain and backups.
 
@@ -34,6 +34,17 @@ unlocked and only on this specific device, excluded from iCloud Keychain and bac
 | Encrypted user key (`encUserKey`) | AES-256-CBC encrypted by the stretched master key; stored in Keychain |
 | Access and refresh tokens | Stored in Keychain under `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` |
 | KDF parameters | Stored in Keychain; required for offline unlock |
+| Retained vault key (Never / On restart only) | Stored in device-local Keychain; On restart restoration requires the same Mac boot UUID; manual lock and sign-out revoke restoration and delete this key |
+
+Settings → Security → Lock Vault defaults to **On reopen**: quitting and relaunching
+Prizm requires an explicit unlock. **On restart** permits restoration across app
+launches within the same Mac boot. **Never** permits restoration across Mac restarts
+too. These policies do not automatically lock on sleep, screensaver, or screen lock.
+Retained keys are not protected by a separate biometric prompt; selecting these
+policies allows Prizm to restore the session while the Mac is unlocked. The master
+password is never retained. Missing, invalid or expired retained sessions fall back
+to explicit unlock. Manual lock revokes the restoration identifier before Keychain
+deletion, so deletion failure cannot authorize restoration of a stale session.
 
 ### Data in transit
 
@@ -222,7 +233,9 @@ item's detail pane and in a "Codes" list.
   or plaintext vault data. A fully compromised server exposes only ciphertext; an
   attacker must still brute-force the KDF to decrypt it.
 - **Disk / at-rest compromise** — Vault data is never on disk in plaintext. The
-  encrypted user key in the Keychain cannot be decrypted without the master password.
+  encrypted user key requires the master password to decrypt. If Never or On restart
+  is selected, a separate retained vault key relies on macOS Keychain protection
+  and permits restoration without the master password, as described above.
 - **Memory dump after lock** — All key material is zeroed on lock. A memory dump
   taken after the vault locks reveals no usable keys.
 - **Clipboard sniffing** — Copied secrets are automatically cleared from the clipboard

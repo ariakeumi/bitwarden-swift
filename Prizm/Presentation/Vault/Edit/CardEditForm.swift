@@ -13,7 +13,7 @@ struct CardEditForm: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
 
-                DetailSectionCard("Card Details") {
+                DetailSectionCard(String(localized: "Card Details")) {
                     OptionalEditFieldRow(label: "Cardholder Name", value: $draft.cardholderName)
                     Divider()
                     OptionalEditFieldRow(label: "Brand", value: $draft.brand)
@@ -27,7 +27,7 @@ struct CardEditForm: View {
                     OptionalEditFieldRow(label: "Security Code", value: $draft.code)
                 }
 
-                DetailSectionCard("Notes") {
+                DetailSectionCard(String(localized: "Notes")) {
                     OptionalEditFieldRow(label: "Notes", value: $draft.notes)
                 }
 

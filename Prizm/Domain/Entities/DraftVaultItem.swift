@@ -226,6 +226,8 @@ nonisolated struct DraftVaultItem: Equatable {
     var isFavorite: Bool
     /// Deletion state is not editable in v1.
     let isDeleted: Bool
+    /// Archive changes use the dedicated endpoint; ordinary edits preserve this metadata.
+    let archivedDate: String?
     /// Dates are server-managed; not editable.
     let creationDate: Date
     let revisionDate: Date
@@ -265,12 +267,13 @@ nonisolated struct DraftVaultItem: Equatable {
     /// Memberwise initialiser for programmatic construction (blank drafts, tests).
     init(id: String, folderId: String? = nil, name: String, isFavorite: Bool, isDeleted: Bool,
          creationDate: Date, revisionDate: Date, content: DraftItemContent, reprompt: Int,
-         organizationId: String? = nil, collectionIds: [String] = []) {
+         organizationId: String? = nil, collectionIds: [String] = [], archivedDate: String? = nil) {
         self.id = id
         self.folderId = folderId
         self.name = name
         self.isFavorite = isFavorite
         self.isDeleted = isDeleted
+        self.archivedDate = archivedDate
         self.creationDate = creationDate
         self.revisionDate = revisionDate
         self.content = content
@@ -286,6 +289,7 @@ nonisolated struct DraftVaultItem: Equatable {
         self.name = item.name
         self.isFavorite = item.isFavorite
         self.isDeleted = item.isDeleted
+        self.archivedDate = item.archivedDate
         self.creationDate = item.creationDate
         self.revisionDate = item.revisionDate
         self.reprompt = item.reprompt
@@ -317,6 +321,7 @@ extension VaultItem {
         self.name = draft.name
         self.isFavorite = draft.isFavorite
         self.isDeleted = draft.isDeleted
+        self.archivedDate = draft.archivedDate
         self.creationDate = draft.creationDate
         self.revisionDate = draft.revisionDate
         self.reprompt = draft.reprompt

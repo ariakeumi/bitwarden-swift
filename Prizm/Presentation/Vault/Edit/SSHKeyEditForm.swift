@@ -15,7 +15,7 @@ struct SSHKeyEditForm: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
 
-                DetailSectionCard("SSH Key") {
+                DetailSectionCard(String(localized: "SSH Key")) {
                     // Private key is sensitive — masked by default with reveal toggle.
                     MaskedEditFieldRow(label: "Private Key", value: $draft.privateKey)
                     Divider()
@@ -25,7 +25,7 @@ struct SSHKeyEditForm: View {
                     readOnlyFingerprintRow
                 }
 
-                DetailSectionCard("Notes") {
+                DetailSectionCard(String(localized: "Notes")) {
                     OptionalEditFieldRow(label: "Notes", value: $draft.notes)
                 }
 

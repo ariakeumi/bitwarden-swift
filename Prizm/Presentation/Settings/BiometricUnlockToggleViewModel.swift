@@ -28,9 +28,9 @@ final class BiometricUnlockToggleViewModel {
 
     var biometryName: String {
         switch LAContext().biometryType {
-        case .touchID: return "Touch ID"
-        case .faceID:  return "Face ID"
-        default:       return "Biometric"
+        case .touchID: return  String(localized: "Touch ID")
+        case .faceID:  return  String(localized: "Face ID")
+        default:       return  String(localized: "Biometric")
         }
     }
 

@@ -55,7 +55,7 @@ final class LoginViewModel: ObservableObject {
         // Reject empty password here to match the UI's disabled-button guard.
         // The Task below must never be spawned with an empty credential.
         guard let passwordData = password.data(using: .utf8), !passwordData.isEmpty else {
-            errorMessage = "Invalid password encoding."
+            errorMessage = String(localized: "Invalid password encoding.")
             flowState    = .login
             return
         }

@@ -28,24 +28,26 @@ struct PrizmApp: App {
     }
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup("Bitvault", id: "vault") {
             rootView
                 .frame(minWidth: 480, minHeight: 360)
+                .background(MainWindowFramePersistence())
                 .environment(optionKeyMonitor)
         }
+        .defaultSize(width: 1100, height: 720)
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified(showsTitle: false))
         .commands {
-            // Replace the default "About Prizm" panel with our custom SwiftUI window.
+            // Replace the default "About Bitvault" panel with our custom SwiftUI window.
             CommandGroup(replacing: .appInfo) {
-                Button("About Prizm") {
+                Button("About Bitvault") {
                     openWindow(id: "about")
                 }
             }
 
             CommandGroup(replacing: .newItem) {
                 Button("New Window") {
-                    NSApp.sendAction(#selector(NSDocumentController.newDocument(_:)), to: nil, from: nil)
+                    openWindow(id: "vault")
                 }
                 .keyboardShortcut("n", modifiers: [.command, .option])
             }
@@ -62,6 +64,22 @@ struct PrizmApp: App {
                 }
                 .keyboardShortcut("l", modifiers: .command)
                 .disabled(!rootVM.isVaultUnlocked)
+
+                Button("Sync Vault") {
+                    rootVM.syncVault()
+                }
+                .keyboardShortcut("r", modifiers: .command)
+                .disabled(!rootVM.canSyncVault)
+            }
+
+            CommandMenu("Navigate") {
+                ForEach(Array(SidebarSelection.shortcutDestinations.enumerated()), id: \.element) { entry in
+                    Button(entry.element.displayName) {
+                        rootVM.navigateToSidebar(entry.element)
+                    }
+                    .keyboardShortcut(KeyEquivalent(Character(String(entry.offset + 1))), modifiers: .command)
+                }
+                .disabled(!rootVM.canNavigateSidebar)
             }
 
             // "Item" menu — sits in the standard macOS menu bar next to Edit/View/Window.
@@ -110,12 +128,12 @@ struct PrizmApp: App {
             }
         }
 
-        // Custom About window — opened via Prizm → About Prizm.
+        // Custom About window — opened via Prizm → About Bitvault.
         // hiddenTitleBar: AboutView provides its own header with the app icon and name,
         // so the system title bar would be redundant.
         // contentSize resizability: window sizes to AboutView's fixed 380pt width; no
         // free resize since the content is a fixed-layout info panel.
-        Window("About Prizm", id: "about") {
+        Window("About Bitvault", id: "about") {
             AboutView()
         }
         .windowStyle(.hiddenTitleBar)
@@ -198,8 +216,43 @@ struct PrizmApp: App {
                 makeAttachmentRowViewModel: { cipherId, attachment in
                     container.makeAttachmentRowViewModel(cipherId: cipherId, attachment: attachment)
                 },
-                makeCodesViewModel: { container.makeTOTPCodesViewModel() }
+                makeCodesViewModel: { container.makeTOTPCodesViewModel() },
+                isSyncing: rootVM.isManualSyncInProgress
             )
+        }
+    }
+}
+
+/// SwiftUI's defaultSize only supplies the initial size; AppKit autosave also
+/// restores the user's last position and size across the root screen changes.
+private struct MainWindowFramePersistence: NSViewRepresentable {
+    func makeNSView(context: Context) -> FrameView { FrameView() }
+    func updateNSView(_ nsView: FrameView, context: Context) {}
+
+    final class FrameView: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard let window else { return }
+            // SwiftUI finishes configuring its window after attaching the content.
+            DispatchQueue.main.async { [weak self, weak window] in
+                guard let self, let window, self.window === window else { return }
+                self.configure(window)
+            }
+        }
+
+        private func configure(_ window: NSWindow) {
+            let baseName = "Bitvault.MainWindow"
+            guard !window.frameAutosaveName.hasPrefix(baseName) else { return }
+            // Each open window needs its own autosave name.
+            let usedNames = Set(NSApp.windows.filter { $0 !== window }.map(\.frameAutosaveName))
+            var name = baseName
+            var index = 2
+            while usedNames.contains(name) {
+                name = "\(baseName).\(index)"
+                index += 1
+            }
+            window.setFrameUsingName(name)
+            window.setFrameAutosaveName(name)
         }
     }
 }
@@ -211,6 +264,7 @@ struct PrizmApp: App {
 protocol RootViewModelDependencies: AnyObject {
     var authRepo: any AuthRepository { get }
     var vaultRepo: any VaultRepository { get }
+    var syncVaultUseCase: any SyncUseCase { get }
     /// Generates the current TOTP code for the "Copy Code" command.
     var generateTOTPCode: any GenerateTOTPCodeUseCase { get }
     /// The per-cipher attachment key cache. Cleared on vault lock alongside the vault store.
@@ -228,13 +282,14 @@ protocol RootViewModelDependencies: AnyObject {
 extension AppContainer: RootViewModelDependencies {
     var authRepo: any AuthRepository { authRepository }
     var vaultRepo: any VaultRepository { vaultStore }
+    var syncVaultUseCase: any SyncUseCase { syncUseCase }
     var generateTOTPCode: any GenerateTOTPCodeUseCase { generateTOTPCodeUseCase }
 }
 
 /// Top-level state machine that decides which screen to show.
 ///
 /// On launch: checks for a stored session via `AuthRepository.storedAccount()`.
-/// - Session found → `UnlockView` (User Story 2)
+/// - Session found → restore if the lock policy permits, otherwise `UnlockView`
 /// - No session    → `LoginView`  (User Story 1)
 @MainActor
 final class RootViewModel: ObservableObject {
@@ -249,6 +304,9 @@ final class RootViewModel: ObservableObject {
     }
 
     @Published var screen: Screen
+    @Published private(set) var isManualSyncInProgress = false
+    private var manualSyncTask: Task<Void, Never>?
+    private var isEndingSession = false
 
     // MARK: - "Item" menu state
 
@@ -272,11 +330,6 @@ final class RootViewModel: ObservableObject {
     /// Using Combine (not SwiftUI .onChange) so transitions fire regardless
     /// of whether the source view is currently in the view hierarchy.
     private var cancellables = Set<AnyCancellable>()
-    /// System notification observers for auto-lock (sleep, screensaver, screen lock).
-    nonisolated(unsafe) private var sleepObserver: NSObjectProtocol?
-    nonisolated(unsafe) private var screensaverObserver: NSObjectProtocol?
-    nonisolated(unsafe) private var screenLockObserver: NSObjectProtocol?
-
     init(container: any RootViewModelDependencies) {
         self.container      = container
         self.loginVM        = container.makeLoginViewModel()
@@ -286,6 +339,10 @@ final class RootViewModel: ObservableObject {
         if let account = container.authRepo.storedAccount() {
             self.screen   = .unlock
             self.unlockVM = container.makeUnlockViewModel(account: account)
+            self.unlockVM?.restoreSessionIfAllowed()
+            if container.authRepo.vaultLockPolicy != .onReopen {
+                self.screen = .loading
+            }
         } else {
             self.screen   = .login
             self.unlockVM = nil
@@ -314,12 +371,6 @@ final class RootViewModel: ObservableObject {
             }
         }
         #endif
-    }
-
-    deinit {
-        if let sleepObserver { NSWorkspace.shared.notificationCenter.removeObserver(sleepObserver) }
-        if let screensaverObserver { DistributedNotificationCenter.default().removeObserver(screensaverObserver) }
-        if let screenLockObserver { DistributedNotificationCenter.default().removeObserver(screenLockObserver) }
     }
 
     // MARK: - Combine subscriptions
@@ -362,26 +413,8 @@ final class RootViewModel: ObservableObject {
             }
         }
 
-        // Auto-lock on Mac sleep.
-        sleepObserver = NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.willSleepNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in MainActor.assumeIsolated { self?.lockVault() } }
-
-        // Auto-lock on screensaver start.
-        screensaverObserver = DistributedNotificationCenter.default().addObserver(
-            forName: .init("com.apple.screensaver.didstart"),
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in MainActor.assumeIsolated { self?.lockVault() } }
-
-        // Auto-lock on screen lock (⌃⌘Q / Lock Screen menu).
-        screenLockObserver = DistributedNotificationCenter.default().addObserver(
-            forName: .init("com.apple.screenIsLocked"),
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in MainActor.assumeIsolated { self?.lockVault() } }
+        // Automatic locking is defined by the persisted restart/reopen policy.
+        // Sleep, screensaver and screen lock do not cross either boundary.
     }
 
     /// Re-scopes the sync timestamp to the current account and records a successful sync,
@@ -456,7 +489,13 @@ final class RootViewModel: ObservableObject {
 
     /// Clears all session data and returns to the login screen.
     func signOut() {
+        guard !isEndingSession else { return }
+        isEndingSession = true
+        let pendingSync = manualSyncTask
+        pendingSync?.cancel()
         Task {
+            defer { isEndingSession = false }
+            await pendingSync?.value
             do {
                 try await container.authRepo.signOut()
             } catch {
@@ -470,13 +509,59 @@ final class RootViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Sidebar navigation
+
+    var canNavigateSidebar: Bool {
+        guard case .vault = screen, !isEndingSession else { return false }
+        return !vaultBrowserVM.editSheetOpen
+    }
+
+    func navigateToSidebar(_ selection: SidebarSelection) {
+        guard canNavigateSidebar else { return }
+        // Global search deselects the sidebar, even when its saved destination matches.
+        vaultBrowserVM.deactivateGlobalSearch(restoreSelection: false)
+        vaultBrowserVM.sidebarSelection = selection
+    }
+
+    // MARK: - Manual sync
+
+    var canSyncVault: Bool {
+        canNavigateSidebar && !isManualSyncInProgress
+    }
+
+    func syncVault() {
+        guard canSyncVault else { return }
+        isManualSyncInProgress = true
+        manualSyncTask = Task {
+            defer {
+                isManualSyncInProgress = false
+                manualSyncTask = nil
+            }
+            do {
+                let result = try await container.syncVaultUseCase.execute(progress: { _ in })
+                guard !Task.isCancelled, !isEndingSession else { return }
+                vaultBrowserVM.handleSyncCompleted(syncedAt: result.syncedAt)
+            } catch {
+                guard !Task.isCancelled, !isEndingSession else { return }
+                vaultBrowserVM.handleSyncError(error.localizedDescription)
+                logger.error("Manual vault sync failed")
+            }
+        }
+    }
+
     // MARK: - Lock
 
     /// Zeros in-memory key material, clears the vault cache, and transitions to the unlock screen.
     /// No-op if the vault is not currently unlocked.
     func lockVault() {
-        guard isVaultUnlocked else { return }
+        guard isVaultUnlocked, !isEndingSession else { return }
+        isEndingSession = true
+        let pendingSync = manualSyncTask
+        pendingSync?.cancel()
         Task {
+            defer { isEndingSession = false }
+            // Finish any writes from the cancelled sync before clearing vault data and keys.
+            await pendingSync?.value
             await container.authRepo.lockVault()
             await container.vaultRepo.clearVault()
             // Clear all key caches in the same lock path as the vault store.
@@ -504,6 +589,7 @@ final class RootViewModel: ObservableObject {
     func handleUnlockFlow(_ state: UnlockFlowState) {
         switch state {
         case .unlock:       screen = .unlock
+        case .restoring:    screen = .loading
         case .loading:      screen = .unlock   // stay on unlock screen with spinner
         case .syncing(let msg): screen = .syncing(message: msg)
         case .vault:        transitionToVault(caller: "handleUnlockFlow")

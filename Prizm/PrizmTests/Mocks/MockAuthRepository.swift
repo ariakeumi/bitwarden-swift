@@ -89,6 +89,23 @@ final class MockAuthRepository: AuthRepository {
         lockVaultCalledCount += 1
     }
 
+    var vaultLockPolicy: VaultLockPolicy = .onReopen
+    var stubbedRestoredAccount: Account?
+    var restoreSessionCalled = false
+    var restoreSessionCallCount = 0
+    var restoreSessionError: Error?
+
+    func setVaultLockPolicy(_ policy: VaultLockPolicy) async throws {
+        vaultLockPolicy = policy
+    }
+
+    func restoreUnlockedSession() async throws -> Account? {
+        restoreSessionCalled = true
+        restoreSessionCallCount += 1
+        if let restoreSessionError { throw restoreSessionError }
+        return stubbedRestoredAccount
+    }
+
     // MARK: - Biometric unlock
 
     var stubbedDeviceBiometricCapable: Bool = false

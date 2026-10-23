@@ -24,10 +24,10 @@ struct LoginDetailView: View {
         VStack(alignment: .leading, spacing: 0) {
 
                 if hasCredentials {
-                    DetailSectionCard("Credentials") {
+                    DetailSectionCard(String(localized: "Credentials")) {
                         if let username = login.username {
                             FieldRowView(
-                                label:  "Username",
+                                label:  String(localized: "Username"),
                                 value:  username,
                                 itemId: item.id,
                                 onCopy: onCopy
@@ -38,7 +38,7 @@ struct LoginDetailView: View {
                         }
                         if let password = login.password {
                             FieldRowView(
-                                label:    "Password",
+                                label:    String(localized: "Password"),
                                 value:    password,
                                 itemId:   item.id,
                                 isMasked: true,
@@ -53,12 +53,12 @@ struct LoginDetailView: View {
                 }
 
                 if !login.uris.isEmpty {
-                    DetailSectionCard("Websites") {
+                    DetailSectionCard(String(localized: "Websites")) {
                         ForEach(login.uris.indices, id: \.self) { index in
                             let uri = login.uris[index]
                             if index > 0 { Divider() }
                             FieldRowView(
-                                label:  "Website",
+                                label:  String(localized: "Website"),
                                 value:  uri.uri,
                                 itemId: item.id,
                                 url:    URL(string: uri.uri),
@@ -69,13 +69,13 @@ struct LoginDetailView: View {
                 }
 
                 if let notes = login.notes, !notes.isEmpty {
-                    DetailSectionCard("Notes") {
-                        FieldRowView(label: "", value: notes, itemId: item.id, isMultiLine: true, onCopy: onCopy)
+                    DetailSectionCard(String(localized: "Notes")) {
+                        FieldRowView(label: String(localized: ""), value: notes, itemId: item.id, isMultiLine: true, onCopy: onCopy)
                     }
                 }
 
                 if !login.customFields.isEmpty {
-                    DetailSectionCard("Custom Fields") {
+                    DetailSectionCard(String(localized: "Custom Fields")) {
                         CustomFieldsSection(
                             fields: login.customFields,
                             itemId: item.id,

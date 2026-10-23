@@ -23,11 +23,18 @@ struct VaultBrowserView: View {
     var makeAttachmentRowViewModel: ((String, Attachment) -> AttachmentRowViewModel)? = nil
     /// Factory for the TOTP code tracker — injected from AppContainer (Constitution §II).
     var makeCodesViewModel: (() -> TOTPCodesViewModel)? = nil
+    var isSyncing = false
 
+    @State private var itemToArchive: VaultItem?
+    @State private var showArchiveAlert = false
     @State private var showPermanentDeleteAlert = false
     @State private var showDeleteFolderAlert = false
     @State private var folderToDelete: Folder?
     @State private var isSearchFieldFocused = false
+    @AppStorage("vault.layout.sidebarWidth") private var sidebarWidth = 210.0
+    @AppStorage("vault.layout.itemListWidth") private var itemListWidth = 280.0
+    @AppStorage("vault.layout.codesListWidth") private var codesListWidth = 420.0
+    @AppStorage("vault.layout.columnVisibility") private var savedColumnVisibility = "all"
     @Environment(\.colorSchemeContrast) private var contrast
 
     private let logger = Logger(subsystem: "com.prizm", category: "UI.VaultBrowser")
@@ -61,6 +68,8 @@ struct VaultBrowserView: View {
                 searchQuery:    viewModel.searchQuery.isEmpty ? nil : viewModel.searchQuery,
                 organizations:  viewModel.organizations,
                 onDelete:       { id in await viewModel.performSoftDelete(id: id) },
+                isArchive:      viewModel.sidebarSelection == .archive,
+                onArchive:      { requestArchive($0) },
                 onToggleFavorite: { viewModel.toggleFavorite(item: $0) }
             )
         }
@@ -91,6 +100,7 @@ struct VaultBrowserView: View {
 
     var body: some View {
         NavigationSplitView(
+            columnVisibility: columnVisibility,
             sidebar: {
                 VStack(spacing: 0) {
                     SidebarView(
@@ -117,9 +127,14 @@ struct VaultBrowserView: View {
                         onRenameCollection: { id, orgId, name in viewModel.renameCollection(id: id, organizationId: orgId, name: name) },
                         onDeleteCollection: { id, orgId in viewModel.deleteCollection(id: id, organizationId: orgId) }
                     )
-                    SyncStatusView(label: viewModel.syncStatusLabel)
+                    SyncStatusView(label: isSyncing ? String(localized: "Syncing vault…") : viewModel.syncStatusLabel)
                 }
-                .navigationSplitViewColumnWidth(min: 180, ideal: 210)
+                .navigationSplitViewColumnWidth(min: 180, ideal: max(180, sidebarWidth))
+                .onGeometryChange(for: Double.self) { geometry in
+                    geometry.size.width.rounded()
+                } action: { width in
+                    if width >= 180 { sidebarWidth = width }
+                }
                 .toolbar {
                     ToolbarItem(placement: .automatic) {
                         SettingsLink {
@@ -164,8 +179,18 @@ struct VaultBrowserView: View {
                 // so it needs a wider column than the regular item list.
                 .navigationSplitViewColumnWidth(
                     min:   viewModel.sidebarSelection == .verificationCodes ? 360 : 220,
-                    ideal: viewModel.sidebarSelection == .verificationCodes ? 420 : 280
+                    ideal: viewModel.sidebarSelection == .verificationCodes
+                        ? max(360, codesListWidth) : max(220, itemListWidth)
                 )
+                .onGeometryChange(for: Double.self) { geometry in
+                    geometry.size.width.rounded()
+                } action: { width in
+                    if viewModel.sidebarSelection == .verificationCodes {
+                        if width >= 360 { codesListWidth = width }
+                    } else if width >= 220 {
+                        itemListWidth = width
+                    }
+                }
             },
             detail: {
                 itemDetail
@@ -186,6 +211,13 @@ struct VaultBrowserView: View {
                                 .accessibilityIdentifier(AccessibilityID.Trash.permanentDeleteButton)
                             }
                         } else {
+                            ToolbarItem(placement: .primaryAction) {
+                                Button(item.isArchived ? String(localized: "Unarchive") : String(localized: "Archive"), systemImage: "archivebox") {
+                                    requestArchive(item)
+                                }
+                                .disabled(viewModel.editSheetOpen)
+                                .accessibilityIdentifier("archive.toolbarAction")
+                            }
                             ToolbarItem(placement: .primaryAction) {
                                 Button {
                                     viewModel.toggleFavorite(item: item)
@@ -217,6 +249,14 @@ struct VaultBrowserView: View {
             }
         )
         .navigationSplitViewStyle(.balanced)
+        .alert("Archive Item?", isPresented: $showArchiveAlert, presenting: itemToArchive) { item in
+            Button("Archive") {
+                Task { await viewModel.performArchive(id: item.id, archived: true) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { item in
+            Text("“\(item.name)” will move to Archive and be hidden from your active vault and verification codes.")
+        }
         .alert("Action Failed", isPresented: Binding(
             get:  { viewModel.actionError != nil },
             set:  { if !$0 { viewModel.actionError = nil } }
@@ -288,6 +328,36 @@ struct VaultBrowserView: View {
                     set: { if !$0 { viewModel.createItemType = nil } }
                 )
             )
+        }
+    }
+
+    private var columnVisibility: Binding<NavigationSplitViewVisibility> {
+        Binding(
+            get: {
+                switch savedColumnVisibility {
+                case "detailOnly": .detailOnly
+                case "doubleColumn": .doubleColumn
+                default: .all
+                }
+            },
+            set: { visibility in
+                if visibility == .detailOnly {
+                    savedColumnVisibility = "detailOnly"
+                } else if visibility == .doubleColumn {
+                    savedColumnVisibility = "doubleColumn"
+                } else {
+                    savedColumnVisibility = "all"
+                }
+            }
+        )
+    }
+
+    private func requestArchive(_ item: VaultItem) {
+        if item.isArchived {
+            Task { await viewModel.performArchive(id: item.id, archived: false) }
+        } else {
+            itemToArchive = item
+            showArchiveAlert = true
         }
     }
 

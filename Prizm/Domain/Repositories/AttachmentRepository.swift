@@ -61,9 +61,9 @@ nonisolated enum AttachmentError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .premiumRequired:
-            return "File attachments require a Bitwarden premium account."
+            return String(localized: "File attachments require a Bitwarden premium account.")
         case .downloadFailed:
-            return "Download failed. If this keeps happening, try locking and unlocking your vault."
+            return String(localized: "Download failed. If this keeps happening, try locking and unlocking your vault.")
         }
     }
 }

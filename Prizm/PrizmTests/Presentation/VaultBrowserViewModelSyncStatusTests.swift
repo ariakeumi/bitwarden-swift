@@ -22,6 +22,7 @@ final class VaultBrowserViewModelSyncStatusTests: XCTestCase {
         return VaultBrowserViewModel(
             vault:           vault,
             search:          SearchVaultUseCaseImpl(vault: vault),
+            archive:         ArchiveVaultItemUseCaseImpl(repository: vault),
             delete:          StubVaultDeleteUseCase(),
             permanentDelete: StubVaultPermanentDeleteUseCase(),
             restore:         StubVaultRestoreUseCase(),

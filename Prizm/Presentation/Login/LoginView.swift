@@ -25,7 +25,7 @@ struct LoginView: View {
                     .font(Typography.screenIcon)
                     .foregroundStyle(.tint)
                     .accessibilityHidden(true)
-                Text("Prizm")
+                Text("Bitvault")
                     .font(Typography.screenHeading)
                 Text("Self-hosted vault")
                     .font(Typography.fieldLabel)

@@ -22,9 +22,19 @@ enum UITestFixtures {
     static var withoutSeeds: Bool { CommandLine.arguments.contains("--ui-test-no-codes") }
 
     static var items: [VaultItem] {
-        let all = seededItems
+        var all = seededItems
+        if CommandLine.arguments.contains("--ui-test-note") {
+            all.append(VaultItem(
+                id: "note", name: "Omega Note", isFavorite: false, isDeleted: false,
+                creationDate: Date(timeIntervalSince1970: 1_700_000_000),
+                revisionDate: Date(timeIntervalSince1970: 1_700_000_000),
+                content: .secureNote(SecureNoteContent(
+                    notes: "First line\nSecond line\n\nFourth line", customFields: []
+                ))
+            ))
+        }
         guard withoutSeeds else { return all }
-        return all.map { login(id: $0.id, name: $0.name, totp: nil, isDeleted: $0.isDeleted) }
+        return all.map { login(id: $0.id, name: $0.name, totp: nil, isDeleted: $0.isDeleted, archivedDate: $0.archivedDate) }
     }
 
     private static var seededItems: [VaultItem] {
@@ -34,18 +44,20 @@ enum UITestFixtures {
                   totp: "otpauth://totp/Beta:me?secret=\(rfcSeed)&digits=8&period=60&algorithm=SHA256"),
             login(id: "gamma", name: "Gamma No Seed", totp: nil),
             login(id: "delta", name: "Delta Bad Seed", totp: "not-a-seed!"),
+            login(id: "archived", name: "Archived Account", totp: rfcSeed, archivedDate: "2026-10-24T01:02:03.000Z"),
             login(id: "zeta", name: "Zeta Trashed", totp: rfcSeed, isDeleted: true),
         ]
     }
 
-    private static func login(id: String, name: String, totp: String?, isDeleted: Bool = false) -> VaultItem {
+    private static func login(id: String, name: String, totp: String?, isDeleted: Bool = false, archivedDate: String? = nil) -> VaultItem {
         VaultItem(
             id: id, name: name, isFavorite: false, isDeleted: isDeleted,
             creationDate: Date(timeIntervalSince1970: 1_700_000_000),
             revisionDate: Date(timeIntervalSince1970: 1_700_000_000),
             content: .login(LoginContent(
                 username: "user-\(id)", password: "pw-\(id)", uris: [], totp: totp, notes: nil, customFields: []
-            ))
+            )),
+            archivedDate: archivedDate
         )
     }
 }

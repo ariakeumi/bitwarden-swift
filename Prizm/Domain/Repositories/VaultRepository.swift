@@ -5,7 +5,7 @@ import Foundation
 /// All methods are `async` — callers must `await` them regardless of their own isolation context.
 protocol VaultRepository: AnyObject, Sendable {
 
-    /// All non-deleted vault items, sorted alphabetically by name (case-insensitive).
+    /// All non-deleted, non-archived vault items, sorted alphabetically by name (case-insensitive).
     func allItems() async throws -> [VaultItem]
 
     /// Items matching the given sidebar selection, sorted alphabetically.
@@ -68,6 +68,9 @@ protocol VaultRepository: AnyObject, Sendable {
     /// patching the in-memory cache without a full re-sync.
     func updateAttachments(_ attachments: [Attachment], for cipherId: String) async
 
+    /// Changes the current user’s archive state using the dedicated Bitwarden endpoint.
+    func setArchived(id: String, archived: Bool) async throws
+
     // MARK: - Folder CRUD
 
     func createFolder(name: String) async throws -> Folder
@@ -97,11 +100,11 @@ nonisolated enum VaultError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .vaultLocked:
-            return "The vault is locked. Please unlock to continue."
+            return String(localized: "The vault is locked. Please unlock to continue.")
         case .decryptionFailed(let detail):
-            return "Decryption failed: \(detail)"
+            return String(localized: "Decryption failed: \(detail)")
         case .itemNotFound(let id):
-            return "Item not found: \(id)"
+            return String(localized: "Item not found: \(id)")
         }
     }
 }

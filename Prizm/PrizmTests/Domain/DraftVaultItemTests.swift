@@ -121,7 +121,7 @@ final class DraftVaultItemTests: XCTestCase {
 
     func test_secureNoteRoundTrip_preservesAllFields() {
         let original = makeVaultItem(content: .secureNote(SecureNoteContent(
-            notes: "Super secret note",
+            notes: "  Super secret note\nSecond line\n\n第四行\n  ",
             customFields: [CustomField(name: "hint", value: "remember", type: .text, linkedId: nil)]
         )))
 

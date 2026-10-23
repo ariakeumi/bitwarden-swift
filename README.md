@@ -43,6 +43,7 @@ Prizm exists to give macOS users a native, auditable, trustworthy interface to t
 
 ## Features
 
+- **Item archiving** — archive and unarchive items with a dedicated, searchable Archive view; archived items stay out of active lists, search and verification codes. Requires a server/account that supports Bitwarden archiving.
 - **Full vault management** — browse, create, edit, delete, and restore all item types (logins, cards, identities, secure notes, SSH keys) with Trash and favourites support
 - **Organisation & collection support** — view and manage items across organisations; collections shown as a collapsible tree in the sidebar with item counts; create, rename, and delete collections (admin/manager role); org items encrypted with RSA-unwrapped organisation keys
 - **Folder organization** — create, rename, and delete folders; nested subfolders via `/` naming convention with collapsible tree view; drag-and-drop items onto folders; folder-scoped search
@@ -51,7 +52,7 @@ Prizm exists to give macOS users a native, auditable, trustworthy interface to t
 - **Verification codes (TOTP)** — see the current one-time code for any login with a TOTP seed, in the item and in a "Codes" list in the sidebar; codes rotate automatically with a countdown, and ⌃⌘C copies the current code (cleared after 30 s). The raw seed is never shown or copied
 - **Password & passphrase generator** — configurable length, character sets, and word separators
 - **Touch ID / Face ID unlock** — unlock your vault with biometrics; auto-prompts on lock; graceful re-enrollment when fingerprints change
-- **Auto-lock** — locks on sleep and screensaver; sync status always visible in the sidebar
+- **Configurable vault locking** — lock after restarting the Mac, after reopening the app, or never automatically; manual lock is always available
 - **Accessible** — VoiceOver labels and hints on all controls, keyboard navigable, respects Reduce Motion and Increase Contrast; targets WCAG 2.1 AA. See [ACCESSIBILITY.md](ACCESSIBILITY.md)
 
 ## Install
@@ -113,6 +114,10 @@ The app is open source. Verify these claims by reading the code. See [SECURITY.m
 
 | Shortcut | Action |
 |---|---|
+| ⌘R | Sync vault |
+| ⌘1 / ⌘2 / ⌘3 | All Items / Favorites / Codes |
+| ⌘4 / ⌘5 / ⌘6 | Login / Card / Identity |
+| ⌘7 / ⌘8 / ⌘9 | Secure Note / SSH Key / Trash |
 | ⌘F | Global search |
 | ⌘N | New item |
 | ⌘L | Lock vault |
@@ -124,7 +129,7 @@ The app is open source. Verify these claims by reading the code. See [SECURITY.m
 | ⇧⌘Q | Sign out |
 | ⌥ (hold) | Reveal masked fields |
 
-Any shortcut can be remapped in **System Settings → Keyboard → Keyboard Shortcuts → App Shortcuts**. Add a rule for Prizm with the exact menu item name and your preferred key combination.
+Any shortcut can be remapped in **System Settings → Keyboard → Keyboard Shortcuts → App Shortcuts**. Add a rule for Bitvault with the exact menu item name and your preferred key combination.
 
 ## Roadmap
 

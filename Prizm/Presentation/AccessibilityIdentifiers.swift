@@ -73,6 +73,7 @@ nonisolated enum AccessibilityID {
 
     enum ItemList {
         static let list              = "itemList.list"
+        static let sortMenu          = "itemList.sortMenu"
         static let emptyState        = "itemList.empty"
         static func row(_ id: String) -> String { "itemList.row.\(id)" }
     }
@@ -120,6 +121,7 @@ nonisolated enum AccessibilityID {
     // MARK: - Item Edit (edit-vault-items)
 
     enum Edit {
+        static let secureNoteBody = "edit.secureNote.body"
         /// The "Edit" toolbar button in ItemDetailView.
         static let editButton    = "edit.button.edit"
         /// The "Save" / "Saving…" button in ItemEditView.

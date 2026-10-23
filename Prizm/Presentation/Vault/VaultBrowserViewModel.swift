@@ -82,6 +82,7 @@ final class VaultBrowserViewModel: ObservableObject {
 
     private let vault:                  any VaultRepository
     private let search:                 any SearchVaultUseCase
+    private let archiveUseCase:         any ArchiveVaultItemUseCase
     private let deleteUseCase:          any DeleteVaultItemUseCase
     private let permanentDeleteUseCase: any PermanentDeleteVaultItemUseCase
     private let restoreUseCase:         any RestoreVaultItemUseCase
@@ -131,6 +132,7 @@ final class VaultBrowserViewModel: ObservableObject {
     init(
         vault:             any VaultRepository,
         search:            any SearchVaultUseCase,
+        archive:           any ArchiveVaultItemUseCase,
         delete:            any DeleteVaultItemUseCase,
         permanentDelete:   any PermanentDeleteVaultItemUseCase,
         restore:           any RestoreVaultItemUseCase,
@@ -146,6 +148,7 @@ final class VaultBrowserViewModel: ObservableObject {
     ) {
         self.vault                  = vault
         self.search                 = search
+        self.archiveUseCase         = archive
         self.deleteUseCase          = delete
         self.permanentDeleteUseCase = permanentDelete
         self.restoreUseCase         = restore
@@ -286,7 +289,8 @@ final class VaultBrowserViewModel: ObservableObject {
         guard let currentId = itemSelection?.id else { return }
         Task { [weak self] in
             guard let self else { return }
-            guard let updated = try? await vault.allItems().first(where: { $0.id == currentId }) else { return }
+            guard let updated = try? await vault.itemDetail(id: currentId),
+                  itemSelection?.id == currentId else { return }
             itemSelection = updated
         }
     }
@@ -373,6 +377,20 @@ final class VaultBrowserViewModel: ObservableObject {
             } catch {
                 logger.error("Toggle favorite failed: \(error.localizedDescription, privacy: .public)")
             }
+        }
+    }
+
+    // MARK: - Archive
+
+    func performArchive(id: String, archived: Bool) async {
+        do {
+            try await archiveUseCase.execute(id: id, archived: archived)
+            if itemSelection?.id == id { itemSelection = nil }
+            refreshItems()
+            refreshCounts()
+        } catch {
+            logger.error("Archive action failed for \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            actionError = error.localizedDescription
         }
     }
 

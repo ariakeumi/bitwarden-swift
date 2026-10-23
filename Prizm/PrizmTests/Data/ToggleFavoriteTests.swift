@@ -21,6 +21,7 @@ final class ToggleFavoriteTests: XCTestCase {
         sut = VaultBrowserViewModel(
             vault:           vault,
             search:          SearchVaultUseCaseImpl(vault: vault),
+            archive:         ArchiveVaultItemUseCaseImpl(repository: vault),
             delete:          StubDelete(),
             permanentDelete: StubPermanentDelete(),
             restore:         StubRestore(),

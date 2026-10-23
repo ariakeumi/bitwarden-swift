@@ -10,6 +10,8 @@ final class MockKeychainService: KeychainService {
     // MARK: - In-memory store
 
     private var store: [String: Data] = [:]
+    var deleteError: Error?
+    var writeError: Error?
 
     // MARK: - Observation
 
@@ -29,11 +31,13 @@ final class MockKeychainService: KeychainService {
     }
 
     func write(data: Data, key: String) throws {
+        if let writeError { throw writeError }
         store[key] = data
         writtenKeys.append(key)
     }
 
     func delete(key: String) throws {
+        if let deleteError { throw deleteError }
         deletedKeys.insert(key)
         store.removeValue(forKey: key)
     }

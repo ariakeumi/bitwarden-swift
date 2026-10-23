@@ -22,11 +22,11 @@ struct VerificationCodeCard: View {
     }
 
     var body: some View {
-        DetailSectionCard("Codes") {
+        DetailSectionCard(String(localized: "Codes")) {
             Group {
                 if let state = codes.states[item.id] {
                     TOTPCodeRowView(itemId: item.id, name: item.name, state: state,
-                                    label: "Code", copiesOnTap: true, onCopy: onCopy)
+                                    label: String(localized: "Code"), copiesOnTap: true, onCopy: onCopy)
                 } else {
                     ProgressView().controlSize(.small)
                 }

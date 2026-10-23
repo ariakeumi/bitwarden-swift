@@ -7,7 +7,7 @@ import SwiftUI
 /// The vault unlock screen shown to returning users (User Story 2, FR-003, FR-039).
 ///
 /// Modelled after the macOS Passwords lock screen: app icon with biometric badge,
-/// title "Prizm Is Locked", email inline in the subtitle, and a single centered
+/// title "Bitvault Is Locked", email inline in the subtitle, and a single centered
 /// password field. Biometric unlock auto-triggers on appearance; the user can also
 /// type their password and press Return.
 struct UnlockView: View {
@@ -40,7 +40,7 @@ struct UnlockView: View {
             .padding(.bottom, 16)
 
             // MARK: Title
-            Text("Prizm Is Locked")
+            Text("Bitvault Is Locked")
                 .font(Typography.screenHeading)
                 .accessibilityIdentifier(AccessibilityID.Unlock.headerTitle)
                 .padding(.bottom, 6)
@@ -55,7 +55,7 @@ struct UnlockView: View {
 
             // MARK: Password field / loading
             switch viewModel.flowState {
-            case .loading:
+            case .loading, .restoring:
                 ProgressView()
                     .controlSize(.regular)
                     .frame(width: 200)
@@ -135,17 +135,17 @@ struct UnlockView: View {
     /// Subtitle varies by whether biometric unlock is available.
     private var subtitleText: String {
         if viewModel.biometricUnlockAvailable {
-            return "\(biometricMethodName) or enter the password for \(viewModel.email) to unlock."
+            return String(localized: "\(biometricMethodName) or enter the password for \(viewModel.email) to unlock.")
         } else {
-            return "Enter the password for \(viewModel.email) to unlock."
+            return String(localized: "Enter the password for \(viewModel.email) to unlock.")
         }
     }
 
     private var biometricMethodName: String {
         switch LAContext().biometryType {
-        case .touchID: return "Touch ID"
-        case .faceID:  return "Face ID"
-        default:       return "Biometrics"
+        case .touchID: return  String(localized: "Touch ID")
+        case .faceID:  return  String(localized: "Face ID")
+        default:       return  String(localized: "Biometrics")
         }
     }
 

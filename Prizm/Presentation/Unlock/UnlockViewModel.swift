@@ -7,6 +7,7 @@ import os.log
 
 enum UnlockFlowState: Equatable {
     case unlock
+    case restoring
     case loading
     case syncing(message: String)
     case vault
@@ -76,6 +77,24 @@ final class UnlockViewModel: ObservableObject {
 
     // MARK: - Actions
 
+    /// Launch-only restoration. A manual lock creates a fresh VM without calling this.
+    func restoreSessionIfAllowed() {
+        guard auth.vaultLockPolicy != .onReopen else { return }
+        flowState = .restoring
+        Task {
+            do {
+                guard try await auth.restoreUnlockedSession() != nil else {
+                    flowState = .unlock
+                    return
+                }
+                await performSync()
+            } catch {
+                logger.error("Session restoration unavailable; requiring explicit unlock")
+                flowState = .unlock
+            }
+        }
+    }
+
     func unlock() {
         logger.info("Unlock flow started")
         errorMessage = nil
@@ -84,7 +103,7 @@ final class UnlockViewModel: ObservableObject {
         // Convert the password String to Data at this boundary so the KDF stack
         // receives `Data` that can be zeroed after use (Constitution §III).
         guard let passwordData = password.data(using: .utf8) else {
-            errorMessage = "Invalid password encoding."
+            errorMessage = String(localized: "Invalid password encoding.")
             flowState    = .unlock
             return
         }

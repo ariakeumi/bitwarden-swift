@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import LocalAuthentication
 import os.log
 
@@ -28,6 +29,29 @@ final class AuthRepositoryImpl: AuthRepository, EmbeddedBiometricUnlock {
     private let crypto:     any PrizmCryptoService
     private let keychain:   any KeychainService
     private let biometricKeychain: any BiometricKeychainService
+    private let defaults: UserDefaults
+    private let bootSessionID: () -> String?
+    private var sessionGeneration = 0
+
+    private struct RetainedSession: Codable {
+        let id: String
+        let userId: String
+        let bootID: String?
+        var keyData: Data
+    }
+
+    var vaultLockPolicy: VaultLockPolicy {
+        VaultLockPolicy(rawValue: defaults.string(forKey: "vaultLockPolicy") ?? "") ?? .onReopen
+    }
+
+    /// A boot UUID is stable across app launches and changes after every Mac restart.
+    nonisolated static func currentBootSessionID() -> String? {
+        var size = 0
+        guard sysctlbyname("kern.bootsessionuuid", nil, &size, nil, 0) == 0, size > 1 else { return nil }
+        var buffer = [CChar](repeating: 0, count: size)
+        guard sysctlbyname("kern.bootsessionuuid", &buffer, &size, nil, 0) == 0 else { return nil }
+        return String(cString: buffer)
+    }
 
     private let logger = Logger(subsystem: "com.prizm", category: "AuthRepository")
 
@@ -55,12 +79,16 @@ final class AuthRepositoryImpl: AuthRepository, EmbeddedBiometricUnlock {
         apiClient: any PrizmAPIClientProtocol,
         crypto:    any PrizmCryptoService,
         keychain:  any KeychainService,
-        biometricKeychain: any BiometricKeychainService
+        biometricKeychain: any BiometricKeychainService,
+        defaults: UserDefaults = .standard,
+        bootSessionID: @escaping () -> String? = AuthRepositoryImpl.currentBootSessionID
     ) {
         self.apiClient = apiClient
         self.crypto    = crypto
         self.keychain  = keychain
         self.biometricKeychain = biometricKeychain
+        self.defaults = defaults
+        self.bootSessionID = bootSessionID
     }
 
     // MARK: - Server configuration
@@ -317,47 +345,8 @@ final class AuthRepositoryImpl: AuthRepository, EmbeddedBiometricUnlock {
         )
         await crypto.unlockWith(keys: vaultKeys)
 
-        // Restore API client state so the post-unlock sync can make authenticated requests.
-        // Both baseURL and accessToken are nil on a fresh app launch until restored here.
-        serverEnvironment = restoredAccount.serverEnvironment
-        await apiClient.setBaseURL(restoredAccount.serverEnvironment.base)
-
-        if let accessToken = try? readString(key: KeychainKey.user(userId, "accessToken")) {
-            await apiClient.setAccessToken(accessToken)
-            if DebugConfig.isEnabled {
-                logger.debug("[debug] unlock: baseURL and access token restored to API client")
-            }
-
-            // The stored access token may be expired. Attempt a refresh using the stored
-            // refresh token so the post-unlock sync doesn't fail with 401.
-            let refreshTokenOpt = try? readString(key: KeychainKey.user(userId, "refreshToken"))
-            if refreshTokenOpt == nil {
-                logger.debug("Unlock: no refresh token in Keychain — skipping token refresh")
-            }
-            if let refreshToken = refreshTokenOpt {
-                do {
-                    let tokens = try await apiClient.refreshAccessToken(refreshToken: refreshToken)
-                    do {
-                        try writeString(tokens.accessToken, key: KeychainKey.user(userId, "accessToken"))
-                        if let newRefresh = tokens.refreshToken {
-                            try writeString(newRefresh, key: KeychainKey.user(userId, "refreshToken"))
-                        }
-                    } catch {
-                        // Persisting the refreshed token failed — the next launch will use
-                        // the old (expired) token and the user may be signed out unexpectedly.
-                        logger.error("Unlock: failed to persist refreshed tokens — next launch may require re-auth: \(error.localizedDescription, privacy: .public)")
-                    }
-                    if DebugConfig.isEnabled {
-                        logger.debug("[debug] unlock: access token refreshed successfully")
-                    }
-                } catch {
-                    // Refresh failed — keep the old token; sync will fail with 401 (non-fatal).
-                    logger.warning("Unlock: token refresh failed — sync may fail: \(error.localizedDescription, privacy: .public)")
-                }
-            }
-        } else {
-            logger.error("Unlock: access token not found in Keychain — sync will fail with 401")
-        }
+        await restoreAPIState(for: restoredAccount)
+        await retainSessionAfterUnlock()
 
         logger.info("Unlock succeeded")
         await MainActor.run {
@@ -390,6 +379,9 @@ final class AuthRepositoryImpl: AuthRepository, EmbeddedBiometricUnlock {
             logger.debug("No active userId during sign-out (may already be cleared)")
             userId = ""
         }
+
+        sessionGeneration += 1
+        revokeRetainedSession(userId: userId)
 
         // Clear biometric Keychain item and preference before clearing other keys.
         try? await disableBiometricUnlock()
@@ -428,6 +420,10 @@ final class AuthRepositoryImpl: AuthRepository, EmbeddedBiometricUnlock {
     // MARK: - Lock
 
     func lockVault() async {
+        sessionGeneration += 1
+        if let userId = try? readString(key: KeychainKey.activeUserId) {
+            revokeRetainedSession(userId: userId)
+        }
         await crypto.lockVault()
         // Notify any open edit sheets to dismiss immediately (no confirmation prompt).
         // Posted on the main queue because subscribers are @MainActor UI components.
@@ -579,6 +575,7 @@ final class AuthRepositoryImpl: AuthRepository, EmbeddedBiometricUnlock {
             }
         }
 
+        await retainSessionAfterUnlock()
         logger.info("Biometric unlock succeeded")
         await MainActor.run {
             NotificationCenter.default.post(name: .vaultDidUnlock, object: nil)
@@ -647,11 +644,145 @@ final class AuthRepositoryImpl: AuthRepository, EmbeddedBiometricUnlock {
             }
         }
 
+        await retainSessionAfterUnlock()
         logger.info("Embedded biometric unlock succeeded")
         await MainActor.run {
             NotificationCenter.default.post(name: .vaultDidUnlock, object: nil)
         }
         return restoredAccount
+    }
+
+    // MARK: - Lock policy and retained unlocked sessions
+
+    func setVaultLockPolicy(_ policy: VaultLockPolicy) async throws {
+        sessionGeneration += 1
+        let generation = sessionGeneration
+        if let userId = try? readString(key: KeychainKey.activeUserId) {
+            // Revoke first, so a failed write/delete cannot authorize stale key material.
+            revokeRetainedSession(userId: userId)
+            if policy != .onReopen, await crypto.isUnlocked {
+                try await retainSession(userId: userId, policy: policy, generation: generation)
+            }
+        }
+        guard generation == sessionGeneration else { return }
+        defaults.set(policy.rawValue, forKey: "vaultLockPolicy")
+    }
+
+    func restoreUnlockedSession() async throws -> Account? {
+        guard let account = storedAccount() else { return nil }
+        let policy = vaultLockPolicy
+        let preferenceKey = resumeIDKey(account.userId)
+        guard policy != .onReopen,
+              let expectedID = defaults.string(forKey: preferenceKey) else {
+            revokeRetainedSession(userId: account.userId)
+            return nil
+        }
+        var session: RetainedSession
+        do {
+            session = try JSONDecoder().decode(RetainedSession.self,
+                from: keychain.read(key: KeychainKey.user(account.userId, "unlockedSession")))
+        } catch {
+            revokeRetainedSession(userId: account.userId)
+            throw error
+        }
+        defer { session.keyData.resetBytes(in: session.keyData.indices) }
+        guard session.id == expectedID, session.userId == account.userId,
+              policy == .never || (session.bootID != nil && session.bootID == bootSessionID()),
+              let keys = CryptoKeys(data: session.keyData) else {
+            revokeRetainedSession(userId: account.userId)
+            return nil
+        }
+        let generation = sessionGeneration
+        await crypto.unlockWith(keys: keys)
+        await restoreAPIState(for: account)
+        guard generation == sessionGeneration else { return nil }
+        NotificationCenter.default.post(name: .vaultDidUnlock, object: nil)
+        return account
+    }
+
+    private func resumeIDKey(_ userId: String) -> String { "vaultResumeSessionID.\(userId)" }
+
+    private func revokeRetainedSession(userId: String) {
+        // Remove authorization before attempting Keychain deletion: fail closed.
+        defaults.removeObject(forKey: resumeIDKey(userId))
+        do {
+            try keychain.delete(key: KeychainKey.user(userId, "unlockedSession"))
+        } catch {
+            logger.error("Retained session deletion failed; restoration has been revoked")
+        }
+    }
+
+    private func retainSession(userId: String, policy: VaultLockPolicy, generation: Int) async throws {
+        let bootID = bootSessionID()
+        guard policy != .onRestart || bootID != nil else {
+            throw AuthError.sessionRetentionFailed
+        }
+        let keys = try await crypto.currentKeys()
+        guard generation == sessionGeneration else { return }
+        var session = RetainedSession(id: UUID().uuidString, userId: userId,
+                                      bootID: bootID, keyData: keys.toData())
+        defer { session.keyData.resetBytes(in: session.keyData.indices) }
+        var encoded = try JSONEncoder().encode(session)
+        defer { encoded.resetBytes(in: encoded.indices) }
+        try keychain.write(data: encoded, key: KeychainKey.user(userId, "unlockedSession"))
+        defaults.set(session.id, forKey: resumeIDKey(userId))
+    }
+
+    private func retainSessionAfterUnlock() async {
+        guard vaultLockPolicy != .onReopen,
+              let userId = try? readString(key: KeychainKey.activeUserId) else { return }
+        revokeRetainedSession(userId: userId)
+        do {
+            try await retainSession(userId: userId, policy: vaultLockPolicy, generation: sessionGeneration)
+        } catch {
+            // Authentication succeeds, but subsequent launches require explicit unlock.
+            logger.error("Could not retain unlocked session; next launch will require unlock")
+        }
+    }
+
+    private func restoreAPIState(for account: Account) async {
+        // Restore API client state so the post-unlock sync can make authenticated requests.
+        // Both baseURL and accessToken are nil on a fresh app launch until restored here.
+        serverEnvironment = account.serverEnvironment
+        await apiClient.setBaseURL(account.serverEnvironment.base)
+
+        if let accessToken = try? readString(key: KeychainKey.user(account.userId, "accessToken")) {
+            await apiClient.setAccessToken(accessToken)
+            if DebugConfig.isEnabled {
+                logger.debug("[debug] unlock: baseURL and access token restored to API client")
+            }
+
+            // The stored access token may be expired. Attempt a refresh using the stored
+            // refresh token so the post-unlock sync doesn't fail with 401.
+            let refreshTokenOpt = try? readString(key: KeychainKey.user(account.userId, "refreshToken"))
+            if refreshTokenOpt == nil {
+                logger.debug("Unlock: no refresh token in Keychain — skipping token refresh")
+            }
+            if let refreshToken = refreshTokenOpt {
+                do {
+                    let tokens = try await apiClient.refreshAccessToken(refreshToken: refreshToken)
+                    do {
+                        try writeString(tokens.accessToken, key: KeychainKey.user(account.userId, "accessToken"))
+                        if let newRefresh = tokens.refreshToken {
+                            try writeString(newRefresh, key: KeychainKey.user(account.userId, "refreshToken"))
+                        }
+                    } catch {
+                        // Persisting the refreshed token failed — the next launch will use
+                        // the old (expired) token and the user may be signed out unexpectedly.
+                        logger.error("Unlock: failed to persist refreshed tokens — next launch may require re-auth: \(error.localizedDescription, privacy: .public)")
+                    }
+                    if DebugConfig.isEnabled {
+                        logger.debug("[debug] unlock: access token refreshed successfully")
+                    }
+                } catch {
+                    // Refresh failed — keep the old token; sync will fail with 401 (non-fatal).
+                    logger.warning("Unlock: token refresh failed — sync may fail: \(error.localizedDescription, privacy: .public)")
+                }
+            }
+        } else {
+            logger.error("Unlock: access token not found in Keychain — sync will fail with 401")
+        }
+
     }
 
     // MARK: - Private helpers
@@ -722,6 +853,7 @@ final class AuthRepositoryImpl: AuthRepository, EmbeddedBiometricUnlock {
         try keychain.write(data: envJSON, key: KeychainKey.user(userId, "serverEnvironment"))
 
         await apiClient.setAccessToken(accessToken)
+        await retainSessionAfterUnlock()
 
         return Account(
             userId:            userId,

@@ -1,0 +1,5 @@
+- [ ] Verify failing UI regressions for startup arrow navigation and multiline note editing.
+- [ ] Restore initial list focus.
+- [ ] Persist window frame, column widths and visibility.
+- [ ] Add a spacious, resizable multiline secure note editor.
+- [ ] Run focused UI journeys and relevant regression checks; build Release.

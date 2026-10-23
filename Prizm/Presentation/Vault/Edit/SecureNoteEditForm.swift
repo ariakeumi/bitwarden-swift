@@ -4,20 +4,31 @@ import SwiftUI
 
 /// Edit form for Secure Note vault items.
 ///
-/// Shows an editable Note text field and the existing custom fields section.
+/// A multiline note editor that grows with the sheet, followed by custom fields.
 struct SecureNoteEditForm: View {
 
     @Binding var draft: DraftSecureNoteContent
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    DetailSectionCard(String(localized: "Note")) {
+                        TextEditor(text: Binding(
+                            get: { draft.notes ?? "" },
+                            set: { draft.notes = $0.isEmpty ? nil : $0 }
+                        ))
+                        .font(Typography.fieldValue)
+                        .scrollContentBackground(.hidden)
+                        .frame(height: max(EditorLayout.minimumNoteHeight, geometry.size.height * 0.7))
+                        .padding(.vertical, Spacing.rowVertical)
+                        .padding(.horizontal, Spacing.rowHorizontal)
+                        .accessibilityLabel("Note")
+                        .accessibilityIdentifier(AccessibilityID.Edit.secureNoteBody)
+                    }
 
-                DetailSectionCard("Note") {
-                    OptionalEditFieldRow(label: "Note", value: $draft.notes)
+                    CustomFieldsEditSection(fields: $draft.customFields)
                 }
-
-                CustomFieldsEditSection(fields: $draft.customFields)
             }
         }
     }

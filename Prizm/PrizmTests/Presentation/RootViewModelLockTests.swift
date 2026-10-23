@@ -40,6 +40,141 @@ final class RootViewModelLockTests: XCTestCase {
         }
     }
 
+    func testLaunchRestoresNeverSessionAndManualLockDoesNotRestoreAgain() async throws {
+        mockAuth.stubbedStoredAccount = stubAccount
+        mockAuth.vaultLockPolicy = .never
+        mockAuth.stubbedRestoredAccount = stubAccount
+        sut = RootViewModel(container: MockRootDependencies(auth: mockAuth, vault: mockVault))
+        try await waitUntil { if case .vault = self.sut.screen { return true }; return false }
+        guard case .vault = sut.screen else { return XCTFail("Session should restore into the vault") }
+        XCTAssertEqual(mockAuth.restoreSessionCallCount, 1)
+
+        sut.lockVault()
+        try await waitUntil { if case .unlock = self.sut.screen { return true }; return false }
+        guard case .unlock = sut.screen else { return XCTFail("Manual lock must stay locked") }
+        XCTAssertEqual(mockAuth.restoreSessionCallCount, 1)
+    }
+
+    func testLaunchWithMissingOrFailedRetainedSessionRequiresUnlock() async throws {
+        mockAuth.stubbedStoredAccount = stubAccount
+        mockAuth.vaultLockPolicy = .onRestart
+        mockAuth.restoreSessionError = AuthError.sessionRetentionFailed
+        sut = RootViewModel(container: MockRootDependencies(auth: mockAuth, vault: mockVault))
+        try await waitUntil { if case .unlock = self.sut.screen { return true }; return false }
+        guard case .unlock = sut.screen else { return XCTFail("Failed restoration must require unlock") }
+        XCTAssertTrue(mockAuth.restoreSessionCalled)
+    }
+
+    func testSidebarNavigationExitsGlobalSearchEvenForSameCategory() {
+        sut.screen = .vault
+        sut.vaultBrowserVM.sidebarSelection = .allItems
+        sut.vaultBrowserVM.activateGlobalSearch()
+        sut.vaultBrowserVM.searchQuery = "query"
+
+        sut.navigateToSidebar(.allItems)
+
+        XCTAssertEqual(sut.vaultBrowserVM.sidebarSelection, .allItems)
+        XCTAssertFalse(sut.vaultBrowserVM.isGlobalSearch)
+        XCTAssertTrue(sut.vaultBrowserVM.searchQuery.isEmpty)
+    }
+
+    func testSidebarNavigationDoesNotChangeSelectionWhileLocked() {
+        sut.screen = .unlock
+        sut.vaultBrowserVM.sidebarSelection = .allItems
+
+        sut.navigateToSidebar(.trash)
+
+        XCTAssertEqual(sut.vaultBrowserVM.sidebarSelection, .allItems)
+        XCTAssertFalse(sut.canNavigateSidebar)
+    }
+
+    func testSidebarNavigationDoesNotSwitchAwayFromAnOpenEditor() {
+        sut.screen = .vault
+        sut.vaultBrowserVM.sidebarSelection = .allItems
+        sut.vaultBrowserVM.handleEditSheetState(true)
+
+        sut.navigateToSidebar(.favorites)
+
+        XCTAssertEqual(sut.vaultBrowserVM.sidebarSelection, .allItems)
+        XCTAssertFalse(sut.canNavigateSidebar)
+    }
+
+    func testSidebarNavigationSelectsRequestedCategory() {
+        sut.screen = .vault
+        sut.navigateToSidebar(.verificationCodes)
+        XCTAssertEqual(sut.vaultBrowserVM.sidebarSelection, .verificationCodes)
+    }
+
+    func testManualSyncUpdatesTimestampOnSuccess() async throws {
+        let deps = MockRootDependencies(auth: mockAuth, vault: mockVault)
+        let date = Date(timeIntervalSince1970: 1_700_000_000)
+        deps.mockSyncUseCase.stubbedResult = SyncResult(syncedAt: date, totalCiphers: 1, failedDecryptionCount: 0)
+        sut = RootViewModel(container: deps)
+        await Task.yield()
+        sut.screen = .vault
+
+        sut.syncVault()
+        try await waitUntil { !self.sut.isManualSyncInProgress }
+
+        XCTAssertEqual(deps.mockSyncUseCase.executeCallCount, 1)
+        XCTAssertEqual(sut.vaultBrowserVM.lastSyncedAt, date)
+        XCTAssertNil(sut.vaultBrowserVM.syncErrorMessage)
+    }
+
+    func testManualSyncFailurePreservesLastSuccessfulTimestamp() async throws {
+        let deps = MockRootDependencies(auth: mockAuth, vault: mockVault)
+        deps.mockSyncUseCase.executeError = SyncError.networkUnavailable
+        sut = RootViewModel(container: deps)
+        await Task.yield()
+        sut.screen = .vault
+        let previous = Date(timeIntervalSince1970: 1_000)
+        sut.vaultBrowserVM.handleSyncCompleted(syncedAt: previous)
+
+        sut.syncVault()
+        try await waitUntil { !self.sut.isManualSyncInProgress }
+
+        XCTAssertEqual(deps.mockSyncUseCase.executeCallCount, 1)
+        XCTAssertEqual(sut.vaultBrowserVM.lastSyncedAt, previous)
+        XCTAssertEqual(sut.vaultBrowserVM.syncErrorMessage, SyncError.networkUnavailable.localizedDescription)
+    }
+
+    func testManualSyncDoesNotRunWhenLockedOrEditing() {
+        let deps = MockRootDependencies(auth: mockAuth, vault: mockVault)
+        sut = RootViewModel(container: deps)
+        sut.screen = .unlock
+        sut.syncVault()
+        XCTAssertFalse(sut.isManualSyncInProgress)
+        XCTAssertFalse(sut.canSyncVault)
+
+        sut.screen = .vault
+        sut.vaultBrowserVM.handleEditSheetState(true)
+        sut.syncVault()
+        XCTAssertFalse(sut.isManualSyncInProgress)
+        XCTAssertFalse(sut.canSyncVault)
+        XCTAssertEqual(deps.mockSyncUseCase.executeCallCount, 0)
+    }
+
+    func testRepeatedManualSyncIsIgnoredAndLockCancelsPendingSync() async throws {
+        let deps = MockRootDependencies(auth: mockAuth, vault: mockVault)
+        deps.mockSyncUseCase.executeDelay = .seconds(10)
+        sut = RootViewModel(container: deps)
+        await Task.yield()
+        mockAuth.stubbedStoredAccount = stubAccount
+        sut.screen = .vault
+
+        sut.syncVault()
+        sut.syncVault()
+        XCTAssertFalse(sut.canSyncVault)
+        try await waitUntil { deps.mockSyncUseCase.executeCallCount == 1 }
+        sut.lockVault()
+        try await waitUntil { if case .unlock = self.sut.screen { return true }; return false }
+
+        guard case .unlock = sut.screen else { return XCTFail("Lock must finish after cancelling manual sync") }
+        XCTAssertFalse(sut.isManualSyncInProgress)
+        XCTAssertNil(sut.vaultBrowserVM.syncErrorMessage)
+        XCTAssertEqual(deps.mockSyncUseCase.executeCallCount, 1)
+    }
+
     // MARK: - 1.1 lockVault() transitions screen to .unlock
 
     func testLockVault_transitionsToUnlock() async throws {
@@ -146,7 +281,8 @@ final class MockRootDependencies: RootViewModelDependencies {
     let orgKeyCache   = OrgKeyCache()
 
     private let mockLoginUseCase = MockLoginUseCase()
-    private let mockSyncUseCase = MockSyncUseCase()
+    let mockSyncUseCase = MockSyncUseCase()
+    var syncVaultUseCase: any SyncUseCase { mockSyncUseCase }
     private let mockVault: MockVaultRepository
 
     init(auth: MockAuthRepository, vault: MockVaultRepository) {
@@ -168,6 +304,7 @@ final class MockRootDependencies: RootViewModelDependencies {
         return VaultBrowserViewModel(
             vault:           mockVault,
             search:          StubSearchUseCase(),
+            archive:         ArchiveVaultItemUseCaseImpl(repository: mockVault),
             delete:          StubDeleteUseCase(),
             permanentDelete: StubPermanentDeleteUseCase(),
             restore:         StubRestoreUseCase(),

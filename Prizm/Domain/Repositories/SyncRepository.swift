@@ -1,8 +1,8 @@
 import Foundation
 
 /// Fetches the encrypted vault from the server and populates the in-memory store.
-/// Called once per unlock event (after login and after every relaunch + unlock).
-/// No background sync, periodic polling, or user-triggered re-sync in v1.
+/// Called after unlock and when the user requests a manual sync.
+/// No background sync or periodic polling.
 /// Implemented by `SyncRepositoryImpl` in the Data layer.
 protocol SyncRepository: Actor {
 
@@ -42,15 +42,15 @@ nonisolated enum SyncError: Error, LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .networkUnavailable:
-            return "No internet connection. Check your network connection."
+            return String(localized: "No internet connection. Check your network connection.")
         case .serverUnreachable(let url):
-            return "Cannot reach \(url.host ?? url.absoluteString). Verify the URL and check your connection."
+            return String(localized: "Cannot reach \(url.host ?? url.absoluteString). Verify the URL and check your connection.")
         case .unauthorized:
-            return "Your session has expired. Try signing out and signing in again."
+            return String(localized: "Your session has expired. Try signing out and signing in again.")
         case .decryptionFailed:
-            return "Failed to decrypt your vault. Please sign in again."
+            return String(localized: "Failed to decrypt your vault. Please sign in again.")
         case .syncInProgress:
-            return "Sync is already in progress."
+            return String(localized: "Sync is already in progress.")
         }
     }
 }
