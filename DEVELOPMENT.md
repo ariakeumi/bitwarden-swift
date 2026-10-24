@@ -43,14 +43,17 @@ A free Apple ID ("Personal Team") works for local builds. You do not need a paid
 For a local build without configuring signing, run this from the repository root:
 
 ```bash
-./build.sh          # Release → build/Build/Products/Release/Bitvault.app
+./build.sh          # Release app + build/Bitvault-Release.dmg
 ./build.sh --open   # Build and open the app
-./build.sh --debug  # Build Debug instead
+./build.sh --debug  # Debug app + build/Bitvault-Debug.dmg
 ```
 
 The script finds Xcode automatically, creates `LocalConfig.xcconfig` from the
 template if missing, and writes a build log under `build/`. An existing local
 configuration is preserved. Set `DEVELOPER_DIR` to choose a specific Xcode.
+Each build also creates a compressed DMG containing `Bitvault.app` and an
+`Applications` shortcut for drag-and-drop installation. Temporary packaging files
+are removed automatically. Local DMGs are unsigned and not notarized.
 
 Open the project in Xcode:
 

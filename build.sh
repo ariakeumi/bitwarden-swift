@@ -9,14 +9,15 @@ usage() {
     cat <<'EOF'
 用法：./build.sh [--debug] [--open]
 
-默认编译 Release 版 Bitvault，无需配置 Apple 开发者签名。
+默认编译 Release 版 Bitvault 并打包 DMG，无需配置 Apple 开发者签名。
 
   --debug   编译 Debug 版
   --open    编译成功后打开 App
   -h, --help  显示帮助
 
 输出：build/Build/Products/Release/Bitvault.app
-Debug 版输出到对应的 Debug 目录。
+      build/Bitvault-Release.dmg
+Debug 版 App 输出到对应的 Debug 目录，DMG 为 build/Bitvault-Debug.dmg。
 可通过 DEVELOPER_DIR 指定使用的 Xcode。
 EOF
 }
@@ -97,7 +98,22 @@ else
     exit 1
 fi
 
-printf '\n编译完成：%s\n日志：%s\n' "$APP_PATH" "$BUILD_LOG"
+DMG_PATH="$BUILD_DIR/Bitvault-$CONFIGURATION.dmg"
+DMG_STAGING="$(mktemp -d "$BUILD_DIR/.dmg-XXXXXX")"
+trap 'rm -rf -- "$DMG_STAGING"' EXIT
+mkdir "$DMG_STAGING/contents"
+/usr/bin/ditto "$APP_PATH" "$DMG_STAGING/contents/Bitvault.app"
+ln -s /Applications "$DMG_STAGING/contents/Applications"
+
+printf '\n正在打包 DMG…\n'
+/usr/bin/hdiutil create \
+    -volname "Bitvault" \
+    -srcfolder "$DMG_STAGING/contents" \
+    -format UDZO \
+    "$DMG_STAGING/Bitvault.dmg"
+mv -f "$DMG_STAGING/Bitvault.dmg" "$DMG_PATH"
+
+printf '\n编译完成：%s\nDMG：%s\n日志：%s\n' "$APP_PATH" "$DMG_PATH" "$BUILD_LOG"
 if [[ "$OPEN_APP" == true ]]; then
     /usr/bin/open "$APP_PATH"
 fi
