@@ -60,15 +60,6 @@ struct UnlockView: View {
                     .controlSize(.regular)
                     .frame(width: 200)
                     .accessibilityIdentifier(AccessibilityID.Unlock.unlockButton)
-            case .syncing(let message):
-                VStack(spacing: 6) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text(message)
-                        .font(Typography.screenBody)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(width: 200)
             default:
                 SecureField("Enter password", text: $viewModel.password)
                     .textFieldStyle(.roundedBorder)

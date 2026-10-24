@@ -17,10 +17,13 @@ struct PrizmApp: App {
     @StateObject private var rootVM:    RootViewModel
     @State       private var optionKeyMonitor = OptionKeyMonitor()
 
-    // Used by the About menu item to open the custom About window scene.
+    // Opens auxiliary windows from their menu commands.
     @Environment(\.openWindow) private var openWindow
 
     init() {
+        #if DEBUG
+        UITestFixtures.configureLayoutIfRequested()
+        #endif
         let c = AppContainer()
         _container = StateObject(wrappedValue: c)
         _rootVM    = StateObject(wrappedValue: RootViewModel(container: c))
@@ -50,6 +53,13 @@ struct PrizmApp: App {
                     openWindow(id: "vault")
                 }
                 .keyboardShortcut("n", modifiers: [.command, .option])
+            }
+
+            CommandGroup(after: .newItem) {
+                Button("Password Generator") {
+                    openWindow(id: "password-generator")
+                }
+                .keyboardShortcut("g", modifiers: .command)
             }
 
             CommandGroup(after: .appInfo) {
@@ -127,6 +137,13 @@ struct PrizmApp: App {
                 .disabled(!rootVM.selectedFieldAvailable(.website))
             }
         }
+
+        Window("Password Generator", id: "password-generator") {
+            PasswordGeneratorWindow(provider: CryptographicRandomnessProvider())
+        }
+        .windowResizability(.contentSize)
+        .defaultLaunchBehavior(.suppressed)
+        .restorationBehavior(.disabled)
 
         // Custom About window — opened via Prizm → About Bitvault.
         // hiddenTitleBar: AboutView provides its own header with the app icon and name,
@@ -217,15 +234,78 @@ struct PrizmApp: App {
                     container.makeAttachmentRowViewModel(cipherId: cipherId, attachment: attachment)
                 },
                 makeCodesViewModel: { container.makeTOTPCodesViewModel() },
-                isSyncing: rootVM.isManualSyncInProgress
+                isSyncing: rootVM.isSyncInProgress
             )
+            .background(VaultColumnLayoutRestorer(viewModel: rootVM.vaultBrowserVM))
+        }
+    }
+}
+
+/// NavigationSplitView treats ideal widths as suggestions. Restore actual divider
+/// positions after its initial layout, then leave native divider dragging in control.
+private struct VaultColumnLayoutRestorer: NSViewRepresentable {
+    @ObservedObject var viewModel: VaultBrowserViewModel
+    @AppStorage("vault.layout.columnVisibility") private var visibility = "all"
+
+    func makeNSView(context: Context) -> SplitViewReader { SplitViewReader() }
+    func updateNSView(_ view: SplitViewReader, context: Context) {
+        view.restore(showsCodes: viewModel.sidebarSelection == .verificationCodes, visibility: visibility)
+    }
+
+    final class SplitViewReader: NSView {
+        private var requestedMode = false
+        private var requestedVisibility = "all"
+        private var restoredMode: Bool?
+        private var restoredVisibility: String?
+        private var restoreTask: Task<Void, Never>?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if window != nil { restore(showsCodes: requestedMode, visibility: requestedVisibility) }
+        }
+
+        func restore(showsCodes: Bool, visibility: String) {
+            requestedMode = showsCodes
+            requestedVisibility = visibility
+            guard window != nil, restoredMode != showsCodes || restoredVisibility != visibility else { return }
+            restoredMode = showsCodes
+            restoredVisibility = visibility
+            restoreTask?.cancel()
+            guard visibility != "detailOnly" else { return }
+            let defaults = UserDefaults.standard
+            let sidebar = min(420, max(180, defaults.object(forKey: "vault.layout.sidebarWidth") as? Double ?? 210))
+            let key = showsCodes ? "vault.layout.codesListWidth" : "vault.layout.itemListWidth"
+            let content = min(720, max(showsCodes ? 360 : 220, defaults.object(forKey: key) as? Double ?? (showsCodes ? 420 : 280)))
+            restoreTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(250))
+                guard !Task.isCancelled, let self, let root = self.window?.contentView else { return }
+                let splits = self.verticalSplits(in: root)
+                guard let outer = splits.first else { return }
+                if visibility != "doubleColumn" {
+                    outer.setPosition(sidebar, ofDividerAt: 0)
+                }
+                if outer.subviews.count >= 3 {
+                    let offset = visibility == "doubleColumn" ? 0 : sidebar + outer.dividerThickness
+                    outer.setPosition(offset + content, ofDividerAt: 1)
+                } else if splits.count > 1 {
+                    splits[1].setPosition(content, ofDividerAt: 0)
+                }
+            }
+        }
+
+        private func verticalSplits(in view: NSView) -> [NSSplitView] {
+            var result: [NSSplitView] = []
+            if let split = view as? NSSplitView, split.isVertical, split.subviews.count >= 2 {
+                result.append(split)
+            }
+            return result + view.subviews.flatMap { verticalSplits(in: $0) }
         }
     }
 }
 
 /// SwiftUI's defaultSize only supplies the initial size; AppKit autosave also
 /// restores the user's last position and size across the root screen changes.
-private struct MainWindowFramePersistence: NSViewRepresentable {
+struct MainWindowFramePersistence: NSViewRepresentable {
     func makeNSView(context: Context) -> FrameView { FrameView() }
     func updateNSView(_ nsView: FrameView, context: Context) {}
 
@@ -240,8 +320,7 @@ private struct MainWindowFramePersistence: NSViewRepresentable {
             }
         }
 
-        private func configure(_ window: NSWindow) {
-            let baseName = "Bitvault.MainWindow"
+        func configure(_ window: NSWindow, autosaveName baseName: String = "Bitvault.MainWindow") {
             guard !window.frameAutosaveName.hasPrefix(baseName) else { return }
             // Each open window needs its own autosave name.
             let usedNames = Set(NSApp.windows.filter { $0 !== window }.map(\.frameAutosaveName))
@@ -304,8 +383,8 @@ final class RootViewModel: ObservableObject {
     }
 
     @Published var screen: Screen
-    @Published private(set) var isManualSyncInProgress = false
-    private var manualSyncTask: Task<Void, Never>?
+    @Published private(set) var isSyncInProgress = false
+    private var syncTask: Task<Void, Never>?
     private var isEndingSession = false
 
     // MARK: - "Item" menu state
@@ -417,13 +496,11 @@ final class RootViewModel: ObservableObject {
         // Sleep, screensaver and screen lock do not cross either boundary.
     }
 
-    /// Re-scopes the sync timestamp to the current account and records a successful sync,
-    /// then transitions to the vault screen.
+    /// Re-scopes the timestamp and opens the vault. Returning sessions sync in the
+    /// background; initial login has already synchronized through LoginUseCase.
     ///
-    /// Called from both `handleLoginFlow` and `handleUnlockFlow` — the vault transition
-    /// logic is identical in both flows. `caller` is included in the error log so the
-    /// originating flow is identifiable when the account is unexpectedly missing.
-    private func transitionToVault(caller: String) {
+    /// `caller` identifies the originating flow if the stored account is missing.
+    private func transitionToVault(caller: String, syncOnEntry: Bool = false) {
         // Re-scope before recording: on first login the AppContainer was initialised without
         // a known email; this corrects the UserDefaults key before handleSyncCompleted writes to it.
         if let email = container.authRepo.storedAccount()?.email {
@@ -435,7 +512,7 @@ final class RootViewModel: ObservableObject {
             logger.error("\(caller, privacy: .public)(.vault): no stored account; sync timestamp not re-scoped")
         }
         screen = .vault
-        // Defer handleSyncCompleted to the next run-loop cycle so that the initial
+        // Defer sync work to the next run-loop cycle so that the initial
         // VaultBrowserView layout pass (triggered by `screen = .vault` above) commits
         // before any @Published mutations from async vault reads arrive.
         //
@@ -451,7 +528,12 @@ final class RootViewModel: ObservableObject {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             MainActor.assumeIsolated {
-                self.vaultBrowserVM.handleSyncCompleted(syncedAt: Date())
+                guard case .vault = self.screen, !self.isEndingSession else { return }
+                if syncOnEntry {
+                    self.startVaultSync()
+                } else {
+                    self.vaultBrowserVM.handleSyncCompleted(syncedAt: Date())
+                }
             }
         }
     }
@@ -491,7 +573,7 @@ final class RootViewModel: ObservableObject {
     func signOut() {
         guard !isEndingSession else { return }
         isEndingSession = true
-        let pendingSync = manualSyncTask
+        let pendingSync = syncTask
         pendingSync?.cancel()
         Task {
             defer { isEndingSession = false }
@@ -503,6 +585,8 @@ final class RootViewModel: ObservableObject {
             }
             await container.vaultRepo.clearVault()
             await container.vaultKeyCache.clear()
+            await container.orgKeyCache.clear()
+            vaultBrowserVM.clearDecryptedState()
             unlockVM = nil
             screen   = .login
             logger.info("Sign out completed")
@@ -523,19 +607,26 @@ final class RootViewModel: ObservableObject {
         vaultBrowserVM.sidebarSelection = selection
     }
 
-    // MARK: - Manual sync
+    // MARK: - Vault sync
 
     var canSyncVault: Bool {
-        canNavigateSidebar && !isManualSyncInProgress
+        canNavigateSidebar && !isSyncInProgress
     }
 
     func syncVault() {
         guard canSyncVault else { return }
-        isManualSyncInProgress = true
-        manualSyncTask = Task {
+        startVaultSync()
+    }
+
+    /// Startup and manual sync share one task so lock/sign-out can cancel and drain
+    /// every vault write before releasing the session's keys.
+    private func startVaultSync() {
+        guard case .vault = screen, !isSyncInProgress, !isEndingSession else { return }
+        isSyncInProgress = true
+        syncTask = Task {
             defer {
-                isManualSyncInProgress = false
-                manualSyncTask = nil
+                isSyncInProgress = false
+                syncTask = nil
             }
             do {
                 let result = try await container.syncVaultUseCase.execute(progress: { _ in })
@@ -544,7 +635,7 @@ final class RootViewModel: ObservableObject {
             } catch {
                 guard !Task.isCancelled, !isEndingSession else { return }
                 vaultBrowserVM.handleSyncError(error.localizedDescription)
-                logger.error("Manual vault sync failed")
+                logger.error("Vault sync failed")
             }
         }
     }
@@ -556,7 +647,7 @@ final class RootViewModel: ObservableObject {
     func lockVault() {
         guard isVaultUnlocked, !isEndingSession else { return }
         isEndingSession = true
-        let pendingSync = manualSyncTask
+        let pendingSync = syncTask
         pendingSync?.cancel()
         Task {
             defer { isEndingSession = false }
@@ -568,6 +659,7 @@ final class RootViewModel: ObservableObject {
             // Key material must not outlive the vault session (Constitution §III).
             await container.vaultKeyCache.clear()
             await container.orgKeyCache.clear()
+            vaultBrowserVM.clearDecryptedState()
             if let account = container.authRepo.storedAccount() {
                 unlockVM = container.makeUnlockViewModel(account: account)
                 screen = .unlock
@@ -591,8 +683,7 @@ final class RootViewModel: ObservableObject {
         case .unlock:       screen = .unlock
         case .restoring:    screen = .loading
         case .loading:      screen = .unlock   // stay on unlock screen with spinner
-        case .syncing(let msg): screen = .syncing(message: msg)
-        case .vault:        transitionToVault(caller: "handleUnlockFlow")
+        case .vault:        transitionToVault(caller: "handleUnlockFlow", syncOnEntry: true)
         case .login:
             // "Sign in with a different account" — reset to login.
             unlockVM = nil

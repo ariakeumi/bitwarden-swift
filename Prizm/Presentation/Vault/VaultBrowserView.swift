@@ -25,16 +25,16 @@ struct VaultBrowserView: View {
     var makeCodesViewModel: (() -> TOTPCodesViewModel)? = nil
     var isSyncing = false
 
-    @State private var itemToArchive: VaultItem?
+    @State private var itemIDsToArchive: [String] = []
+    @State private var itemNameToArchive: String?
     @State private var showArchiveAlert = false
     @State private var showPermanentDeleteAlert = false
     @State private var showDeleteFolderAlert = false
     @State private var folderToDelete: Folder?
     @State private var isSearchFieldFocused = false
-    @AppStorage("vault.layout.sidebarWidth") private var sidebarWidth = 210.0
-    @AppStorage("vault.layout.itemListWidth") private var itemListWidth = 280.0
-    @AppStorage("vault.layout.codesListWidth") private var codesListWidth = 420.0
     @AppStorage("vault.layout.columnVisibility") private var savedColumnVisibility = "all"
+    @AppStorage("vault.list.sortOrder") private var sortOrder: ItemListSortOrder = .nameAscending
+    @State private var didRestoreLayout = false
     @Environment(\.colorSchemeContrast) private var contrast
 
     private let logger = Logger(subsystem: "com.prizm", category: "UI.VaultBrowser")
@@ -43,7 +43,10 @@ struct VaultBrowserView: View {
     /// Extracted from `body` to keep the type checker fast.
     @ViewBuilder
     private var itemListPane: some View {
-        if viewModel.sidebarSelection == .trash {
+        if isSyncing && viewModel.displayedItems.isEmpty {
+            ProgressView("Syncing vault…")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if viewModel.sidebarSelection == .trash {
             TrashView(
                 items:             viewModel.displayedItems,
                 selection:         $viewModel.itemSelection,
@@ -63,11 +66,15 @@ struct VaultBrowserView: View {
         } else {
             ItemListView(
                 items:          viewModel.displayedItems,
-                selection:      $viewModel.itemSelection,
+                selection:      Binding(
+                    get: { viewModel.selectedItemIDs },
+                    set: { ids in Task { @MainActor in viewModel.selectedItemIDs = ids } }
+                ),
                 faviconLoader:  faviconLoader,
+                sortOrder:      $sortOrder,
                 searchQuery:    viewModel.searchQuery.isEmpty ? nil : viewModel.searchQuery,
                 organizations:  viewModel.organizations,
-                onDelete:       { id in await viewModel.performSoftDelete(id: id) },
+                onDelete:       { ids in await viewModel.performSoftDelete(ids: ids) },
                 isArchive:      viewModel.sidebarSelection == .archive,
                 onArchive:      { requestArchive($0) },
                 onToggleFavorite: { viewModel.toggleFavorite(item: $0) }
@@ -76,7 +83,29 @@ struct VaultBrowserView: View {
     }
 
     /// The detail column. Extracted from `body` to keep the type checker fast.
+    @ViewBuilder
     private var itemDetail: some View {
+        if viewModel.selectedItemIDs.count > 1 {
+            ContentUnavailableView {
+                Label {
+                    Text("\(viewModel.selectedItemIDs.count) items selected")
+                } icon: {
+                    Image(systemName: "checkmark.circle")
+                        .accessibilityHidden(true)
+                }
+            } description: {
+                Text("Right-click the selection to archive or move items to Trash.")
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text("\(viewModel.selectedItemIDs.count) items selected"))
+            .accessibilityHint("Right-click the selection to archive or move items to Trash.")
+            .accessibilityIdentifier("itemList.selectionSummary")
+        } else {
+            singleItemDetail
+        }
+    }
+
+    private var singleItemDetail: some View {
         ItemDetailView(
             item:                           viewModel.itemSelection,
             faviconLoader:                  faviconLoader,
@@ -129,12 +158,16 @@ struct VaultBrowserView: View {
                     )
                     SyncStatusView(label: isSyncing ? String(localized: "Syncing vault…") : viewModel.syncStatusLabel)
                 }
-                .navigationSplitViewColumnWidth(min: 180, ideal: max(180, sidebarWidth))
                 .onGeometryChange(for: Double.self) { geometry in
                     geometry.size.width.rounded()
                 } action: { width in
-                    if width >= 180 { sidebarWidth = width }
+                    if didRestoreLayout, width >= 180 {
+                        UserDefaults.standard.set(width, forKey: "vault.layout.sidebarWidth")
+                    }
                 }
+                .navigationSplitViewColumnWidth(
+                    min: 180, ideal: 210, max: 420
+                )
                 .toolbar {
                     ToolbarItem(placement: .automatic) {
                         SettingsLink {
@@ -151,7 +184,7 @@ struct VaultBrowserView: View {
                     itemListPane
                 }
                 .toolbar {
-                    ToolbarItem(placement: .primaryAction) {
+                    ToolbarItemGroup(placement: .primaryAction) {
                         Menu {
                             ForEach(ItemType.allCases) { type in
                                 Button {
@@ -173,24 +206,44 @@ struct VaultBrowserView: View {
                                 .frame(width: 0, height: 0)
                                 .opacity(0)
                         }
+
+                        if viewModel.sidebarSelection != .trash && viewModel.sidebarSelection != .verificationCodes {
+                            Menu {
+                                Picker("Sort", selection: $sortOrder) {
+                                    ForEach(ItemListSortOrder.allCases, id: \.self) { order in
+                                        Text(order.title).tag(order)
+                                    }
+                                }
+                                .pickerStyle(.inline)
+                            } label: {
+                                Image(systemName: "arrow.up.arrow.down")
+                            }
+                            .menuIndicator(.hidden)
+                            .help("Sort items")
+                            .accessibilityLabel("Sort items")
+                            .accessibilityValue(sortOrder.title)
+                            .accessibilityIdentifier(AccessibilityID.ItemList.sortMenu)
+                        }
                     }
                 }
-                // The Verification Codes list shows name, code, countdown, and COPY on one line,
-                // so it needs a wider column than the regular item list.
-                .navigationSplitViewColumnWidth(
-                    min:   viewModel.sidebarSelection == .verificationCodes ? 360 : 220,
-                    ideal: viewModel.sidebarSelection == .verificationCodes
-                        ? max(360, codesListWidth) : max(220, itemListWidth)
-                )
                 .onGeometryChange(for: Double.self) { geometry in
                     geometry.size.width.rounded()
                 } action: { width in
+                    guard didRestoreLayout else { return }
                     if viewModel.sidebarSelection == .verificationCodes {
-                        if width >= 360 { codesListWidth = width }
+                        if width >= 360 {
+                            UserDefaults.standard.set(width, forKey: "vault.layout.codesListWidth")
+                        }
                     } else if width >= 220 {
-                        itemListWidth = width
+                        UserDefaults.standard.set(width, forKey: "vault.layout.itemListWidth")
                     }
                 }
+                // Codes need more space for the code, countdown and copy action.
+                .navigationSplitViewColumnWidth(
+                    min: viewModel.sidebarSelection == .verificationCodes ? 360 : 220,
+                    ideal: viewModel.sidebarSelection == .verificationCodes ? 420 : 280,
+                    max: 720
+                )
             },
             detail: {
                 itemDetail
@@ -213,7 +266,7 @@ struct VaultBrowserView: View {
                         } else {
                             ToolbarItem(placement: .primaryAction) {
                                 Button(item.isArchived ? String(localized: "Unarchive") : String(localized: "Archive"), systemImage: "archivebox") {
-                                    requestArchive(item)
+                                    requestArchive([item])
                                 }
                                 .disabled(viewModel.editSheetOpen)
                                 .accessibilityIdentifier("archive.toolbarAction")
@@ -249,13 +302,25 @@ struct VaultBrowserView: View {
             }
         )
         .navigationSplitViewStyle(.balanced)
-        .alert("Archive Item?", isPresented: $showArchiveAlert, presenting: itemToArchive) { item in
+        .task {
+            // Ignore provisional minimum widths before the App-layer restorer runs.
+            try? await Task.sleep(for: .milliseconds(200))
+            guard !Task.isCancelled else { return }
+            didRestoreLayout = true
+        }
+        .alert(itemIDsToArchive.count > 1 ? String(localized: "Archive Items?") : String(localized: "Archive Item?"),
+               isPresented: $showArchiveAlert) {
             Button("Archive") {
-                Task { await viewModel.performArchive(id: item.id, archived: true) }
+                let ids = itemIDsToArchive
+                Task { await viewModel.performArchive(ids: ids, archived: true) }
             }
             Button("Cancel", role: .cancel) {}
-        } message: { item in
-            Text("“\(item.name)” will move to Archive and be hidden from your active vault and verification codes.")
+        } message: {
+            if let name = itemNameToArchive {
+                Text("“\(name)” will move to Archive and be hidden from your active vault and verification codes.")
+            } else {
+                Text("\(itemIDsToArchive.count) items will move to Archive and be hidden from your active vault and verification codes.")
+            }
         }
         .alert("Action Failed", isPresented: Binding(
             get:  { viewModel.actionError != nil },
@@ -352,11 +417,14 @@ struct VaultBrowserView: View {
         )
     }
 
-    private func requestArchive(_ item: VaultItem) {
-        if item.isArchived {
-            Task { await viewModel.performArchive(id: item.id, archived: false) }
+    private func requestArchive(_ items: [VaultItem]) {
+        guard !items.isEmpty else { return }
+        if items.allSatisfy(\.isArchived) {
+            let ids = items.map(\.id)
+            Task { await viewModel.performArchive(ids: ids, archived: false) }
         } else {
-            itemToArchive = item
+            itemIDsToArchive = items.map(\.id)
+            itemNameToArchive = items.count == 1 ? items.first?.name : nil
             showArchiveAlert = true
         }
     }

@@ -1,15 +1,27 @@
 import SwiftUI
 
-/// Password/passphrase generator popover.
-/// Receives a binding to write the generated value into the target field.
+/// Native standalone utility; the scene keeps one window and clears output when closed.
+struct PasswordGeneratorWindow: View {
+    @StateObject private var viewModel: PasswordGeneratorViewModel
+
+    init(provider: RandomnessProvider) {
+        _viewModel = StateObject(wrappedValue: PasswordGeneratorViewModel(provider: provider))
+    }
+
+    var body: some View {
+        PasswordGeneratorView(viewModel: viewModel)
+    }
+}
+
+/// Shared controls, with an optional target field for the editor's Use action.
 struct PasswordGeneratorView: View {
 
     @ObservedObject var viewModel: PasswordGeneratorViewModel
-    @Binding var targetValue: String?
+    var targetValue: Binding<String?>? = nil
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Spacing.headerGap) {
 
             // Mode picker
             Picker("Mode", selection: $viewModel.mode) {
@@ -39,15 +51,19 @@ struct PasswordGeneratorView: View {
             // Action row
             actionRow
         }
-        .padding()
+        .padding(Spacing.pageMargin)
         .frame(width: 320)
+        .onAppear {
+            if viewModel.generatedValue.isEmpty { viewModel.generate() }
+        }
+        .onDisappear { viewModel.clearGeneratedValue() }
     }
 
     // MARK: - Password controls
 
     @ViewBuilder
     private var passwordControls: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Spacing.headerGap) {
             HStack {
                 Text("Length: \(viewModel.length)")
                     .font(Typography.fieldLabel)
@@ -58,9 +74,11 @@ struct PasswordGeneratorView: View {
                     get: { Double(viewModel.length) },
                     set: { viewModel.length = Int($0) }
                 ),
-                in: 5...128,
+                in: Double(PasswordGeneratorConfig.passwordLengthRange.lowerBound)...Double(PasswordGeneratorConfig.passwordLengthRange.upperBound),
                 step: 1
             )
+            .accessibilityLabel("Password length")
+            .accessibilityValue(String(viewModel.length))
             .accessibilityIdentifier(AccessibilityID.Generator.lengthSlider)
 
             Toggle("Uppercase (A–Z)", isOn: $viewModel.includeUppercase)
@@ -84,7 +102,7 @@ struct PasswordGeneratorView: View {
 
     @ViewBuilder
     private var passphraseControls: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Spacing.headerGap) {
             Stepper("Words: \(viewModel.wordCount)", value: $viewModel.wordCount, in: 3...10)
                 .accessibilityIdentifier(AccessibilityID.Generator.wordCountStepper)
             HStack {
@@ -111,11 +129,18 @@ struct PasswordGeneratorView: View {
                 Text(error)
                     .font(Typography.fieldValue)
                     .foregroundStyle(.red)
+            } else if viewModel.generatedValue.isEmpty {
+                Text("Generate a new password to continue.")
+                    .font(Typography.fieldValue)
+                    .foregroundStyle(.secondary)
             } else {
                 Text(viewModel.generatedValue)
                     .font(Typography.fieldValue.monospaced())
-                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
+                    // Recreate the native selectable text so its accessibility value
+                    // tracks regeneration and mode changes on macOS.
+                    .id(viewModel.generatedValue)
                     .accessibilityIdentifier(AccessibilityID.Generator.preview)
             }
             Spacer()
@@ -137,22 +162,27 @@ struct PasswordGeneratorView: View {
     @ViewBuilder
     private var actionRow: some View {
         HStack {
-            Button("Copy") {
+            Button(viewModel.hasCopied ? "Copied" : "Copy") {
                 viewModel.copyToClipboard()
             }
-            .disabled(viewModel.errorMessage != nil)
+            .disabled(viewModel.generatedValue.isEmpty || viewModel.errorMessage != nil)
             .accessibilityHint("Copies to clipboard")
             .accessibilityIdentifier(AccessibilityID.Generator.copyButton)
 
             Spacer()
 
-            Button(viewModel.mode == .password ? "Use Password" : "Use Passphrase") {
-                targetValue = viewModel.generatedValue
-                dismiss()
+            if let targetValue {
+                Button(viewModel.mode == .password ? "Use Password" : "Use Passphrase") {
+                    targetValue.wrappedValue = viewModel.generatedValue
+                    dismiss()
+                }
+                .disabled(viewModel.generatedValue.isEmpty || viewModel.errorMessage != nil)
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier(AccessibilityID.Generator.useButton)
+            } else {
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
             }
-            .disabled(viewModel.errorMessage != nil)
-            .buttonStyle(.borderedProminent)
-            .accessibilityIdentifier(AccessibilityID.Generator.useButton)
         }
     }
 

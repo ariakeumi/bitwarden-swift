@@ -30,7 +30,27 @@ final class VaultBrowserViewModel: ObservableObject {
         }
     }
 
-    @Published var itemSelection: VaultItem?
+    /// The detail pane and single-item commands are active only for one selection.
+    @Published var itemSelection: VaultItem? {
+        didSet {
+            guard !isUpdatingSelection else { return }
+            isUpdatingSelection = true
+            defer { isUpdatingSelection = false }
+            let ids: Set<String> = itemSelection.map { [$0.id] } ?? []
+            if selectedItemIDs != ids { selectedItemIDs = ids }
+        }
+    }
+    @Published var selectedItemIDs: Set<String> = [] {
+        didSet {
+            guard !isUpdatingSelection, selectedItemIDs != oldValue else { return }
+            isUpdatingSelection = true
+            defer { isUpdatingSelection = false }
+            itemSelection = selectedItemIDs.count == 1
+                ? displayedItems.first { selectedItemIDs.contains($0.id) }
+                : nil
+        }
+    }
+    private var isUpdatingSelection = false
     @Published var searchQuery:   String = "" {
         didSet { Task { @MainActor in refreshItems() } }
     }
@@ -126,6 +146,8 @@ final class VaultBrowserViewModel: ObservableObject {
     // MARK: - Clipboard auto-clear
 
     private var clipboardClearTask: Task<Void, Never>?
+    /// Invalidates reads started before a session was locked or signed out.
+    private var vaultReadGeneration = 0
 
     // MARK: - Init
 
@@ -259,9 +281,26 @@ final class VaultBrowserViewModel: ObservableObject {
 
     // MARK: - Refresh
 
+    /// Drop decrypted UI snapshots before another session can enter the browser.
+    /// Actor reads already in flight must not restore the previous session's values.
+    func clearDecryptedState() {
+        vaultReadGeneration += 1
+        itemSelection = nil
+        displayedItems = []
+        itemCounts = [:]
+        folders = []
+        organizations = []
+        collections = []
+        createItemType = nil
+        editSheetOpen = false
+        syncErrorMessage = nil
+        actionError = nil
+    }
+
     /// Refreshes `displayedItems` from the vault store based on current selection + search query.
     /// Executes the vault read on the actor executor via a fire-and-forget `Task`.
     func refreshItems() {
+        let generation = vaultReadGeneration
         Task { [weak self] in
             guard let self else { return }
             do {
@@ -272,11 +311,26 @@ final class VaultBrowserViewModel: ObservableObject {
                 } else {
                     scope = sidebarSelection
                 }
-                displayedItems = try await search.execute(query: searchQuery, in: scope)
+                let items = try await search.execute(query: searchQuery, in: scope)
+                guard generation == vaultReadGeneration else { return }
+                displayedItems = items
+                reconcileItemSelection()
             } catch {
+                guard generation == vaultReadGeneration else { return }
                 logger.error("Failed to load vault items: \(error.localizedDescription, privacy: .public)")
                 displayedItems = []
+                selectedItemIDs = []
             }
+        }
+    }
+
+    /// IDs survive item value changes during sync, but cannot select hidden results.
+    private func reconcileItemSelection() {
+        let visibleSelection = selectedItemIDs.intersection(displayedItems.map(\.id))
+        if visibleSelection != selectedItemIDs {
+            selectedItemIDs = visibleSelection
+        } else if visibleSelection.count == 1 {
+            itemSelection = displayedItems.first { visibleSelection.contains($0.id) }
         }
     }
 
@@ -297,10 +351,13 @@ final class VaultBrowserViewModel: ObservableObject {
 
     /// Refreshes sidebar item counts from the vault store.
     func refreshCounts() {
+        let generation = vaultReadGeneration
         Task { [weak self] in
             guard let self else { return }
             do {
-                itemCounts = try await vault.itemCounts()
+                let counts = try await vault.itemCounts()
+                guard generation == vaultReadGeneration else { return }
+                itemCounts = counts
             } catch {
                 logger.error("Failed to load item counts: \(error.localizedDescription, privacy: .public)")
             }
@@ -385,12 +442,19 @@ final class VaultBrowserViewModel: ObservableObject {
     func performArchive(id: String, archived: Bool) async {
         do {
             try await archiveUseCase.execute(id: id, archived: archived)
-            if itemSelection?.id == id { itemSelection = nil }
+            selectedItemIDs.remove(id)
             refreshItems()
             refreshCounts()
         } catch {
             logger.error("Archive action failed for \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
             actionError = error.localizedDescription
+        }
+    }
+
+    func performArchive(ids: [String], archived: Bool) async {
+        actionError = nil
+        for id in Set(ids).sorted() {
+            await performArchive(id: id, archived: archived)
         }
     }
 
@@ -405,23 +469,19 @@ final class VaultBrowserViewModel: ObservableObject {
         do {
             try await deleteUseCase.execute(id: id)
             logger.info("Item soft-deleted: \(id, privacy: .public)")
-            if itemSelection?.id == id {
-                let idx = displayedItems.firstIndex(where: { $0.id == id })
-                refreshItems()
-                if let idx {
-                    itemSelection = displayedItems.indices.contains(idx) ? displayedItems[idx]
-                        : displayedItems.indices.contains(idx - 1) ? displayedItems[idx - 1]
-                        : nil
-                } else {
-                    itemSelection = nil
-                }
-            } else {
-                refreshItems()
-            }
+            selectedItemIDs.remove(id)
+            refreshItems()
             refreshCounts()
         } catch {
             logger.error("Soft-delete failed for \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
             actionError = error.localizedDescription
+        }
+    }
+
+    func performSoftDelete(ids: [String]) async {
+        actionError = nil
+        for id in Set(ids).sorted() {
+            await performSoftDelete(id: id)
         }
     }
 
@@ -527,10 +587,13 @@ final class VaultBrowserViewModel: ObservableObject {
     // MARK: - Refresh
 
     func refreshFolders() {
+        let generation = vaultReadGeneration
         Task { [weak self] in
             guard let self else { return }
             do {
-                folders = try await vault.folders()
+                let updated = try await vault.folders()
+                guard generation == vaultReadGeneration else { return }
+                folders = updated
             } catch {
                 logger.error("Failed to load folders: \(error.localizedDescription, privacy: .public)")
             }
@@ -538,11 +601,15 @@ final class VaultBrowserViewModel: ObservableObject {
     }
 
     func refreshOrganizations() {
+        let generation = vaultReadGeneration
         Task { [weak self] in
             guard let self else { return }
             do {
-                organizations = try await vault.organizations()
-                collections   = try await vault.collections()
+                let updatedOrganizations = try await vault.organizations()
+                let updatedCollections = try await vault.collections()
+                guard generation == vaultReadGeneration else { return }
+                organizations = updatedOrganizations
+                collections = updatedCollections
             } catch {
                 logger.error("Failed to load organizations: \(error.localizedDescription, privacy: .public)")
             }

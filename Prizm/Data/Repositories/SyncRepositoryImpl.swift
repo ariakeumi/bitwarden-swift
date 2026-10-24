@@ -53,6 +53,7 @@ actor SyncRepositoryImpl: SyncRepository {
     // MARK: - SyncRepository
 
     func sync(progress: @Sendable @escaping (String) -> Void) async throws -> SyncResult {
+        try Task.checkCancellation()
         guard !isSyncing else {
             logger.info("sync() called while already in progress")
             throw SyncError.syncInProgress
@@ -67,7 +68,10 @@ actor SyncRepositoryImpl: SyncRepository {
         let syncResponse: SyncResponse
         do {
             syncResponse = try await apiClient.fetchSync()
+        } catch is CancellationError {
+            throw CancellationError()
         } catch let err as APIError {
+            try Task.checkCancellation()
             switch err {
             case .httpError(statusCode: 401, _):
                 throw SyncError.unauthorized
@@ -75,6 +79,7 @@ actor SyncRepositoryImpl: SyncRepository {
                 throw SyncError.networkUnavailable
             }
         } catch {
+            try Task.checkCancellation()
             throw SyncError.networkUnavailable
         }
 
@@ -99,8 +104,10 @@ actor SyncRepositoryImpl: SyncRepository {
 
         // Phase 2: Decrypt personal ciphers via the crypto service.
         progress("Decrypting \(totalCiphers) item(s)…")
+        try Task.checkCancellation()
 
         var (items, failedCount, cipherKeyMap) = try await crypto.decryptList(ciphers: syncResponse.ciphers)
+        try Task.checkCancellation()
         logger.info("Decrypted \(items.count) cipher(s); \(failedCount) failure(s)")
         if DebugConfig.isEnabled && failedCount > 0 {
             logger.debug("[debug] \(failedCount, privacy: .public) cipher(s) failed to decrypt — check PrizmCryptoService logs for per-cipher errors")
@@ -114,6 +121,7 @@ actor SyncRepositoryImpl: SyncRepository {
 
         // Phase 2b: Decrypt folder names.
         let (folders, folderFailedCount) = try await crypto.decryptFolders(folders: syncResponse.folders)
+        try Task.checkCancellation()
         logger.info("Decrypted \(folders.count, privacy: .public) folder(s); \(folderFailedCount, privacy: .public) failure(s)")
         if folderFailedCount > 0 {
             logger.error("decryptFolders: \(folderFailedCount, privacy: .public) folder(s) failed to decrypt")
@@ -149,12 +157,15 @@ actor SyncRepositoryImpl: SyncRepository {
                 // Failure for a single org is logged and skipped; other orgs proceed.
                 await orgKeyCache.clear()  // Fresh slate for this sync.
                 for rawOrg in syncResponse.organizations {
+                    try Task.checkCancellation()
                     do {
                         let orgKeys = try await crypto.unwrapOrgKey(
                             encOrgKey: rawOrg.key,
                             rsaPrivateKey: rsaPrivateKeyBytes
                         )
                         await orgKeyCache.store(key: orgKeys, for: rawOrg.id)
+                    } catch is CancellationError {
+                        throw CancellationError()
                     } catch {
                         logger.fault("Failed to unwrap org key for org \(rawOrg.id.prefix(8), privacy: .public)… — org ciphers will be skipped: \(error, privacy: .public)")
                     }
@@ -199,6 +210,7 @@ actor SyncRepositoryImpl: SyncRepository {
                 let orgMapper = CipherMapper()
                 var orgCipherFailedCount = 0
                 for (index, cipher) in syncResponse.ciphers.enumerated() {
+                    try Task.checkCancellation()
                     guard cipher.organizationId != nil else { continue }
                     do {
                         let (item, cipherKey) = try orgMapper.map(
@@ -221,13 +233,17 @@ actor SyncRepositoryImpl: SyncRepository {
                 await vaultKeyCache.populate(keys: cipherKeyMap)
 
                 logger.info("Org sync: \(organizations.count) org(s), \(collections.count) collection(s), \(orgCipherFailedCount, privacy: .public) org cipher(s) skipped")
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
+                try Task.checkCancellation()
                 logger.error("Org key sync failed — org ciphers unavailable this session: \(error, privacy: .public)")
                 // Non-fatal: personal items still work without org support.
             }
         }
 
         // Phase 3: Populate the in-memory vault store.
+        try Task.checkCancellation()
         let syncedAt = Date()
         await vaultRepository.populate(
             items:         items,

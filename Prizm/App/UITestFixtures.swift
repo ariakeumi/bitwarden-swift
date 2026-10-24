@@ -8,9 +8,28 @@ import Foundation
 /// use made-up names and RFC 6238 test secrets, never real credentials.
 enum UITestFixtures {
 
+    /// Isolates fixture sessions from the login keychain and its access prompts.
+    final class InMemoryKeychain: KeychainService {
+        private var values: [String: Data] = [:]
+
+        func read(key: String) throws -> Data {
+            guard let value = values[key] else { throw KeychainError.itemNotFound }
+            return value
+        }
+
+        func write(data: Data, key: String) throws { values[key] = data }
+        func delete(key: String) throws { values[key] = nil }
+    }
+
     static let launchArgument = "--ui-test-vault"
 
     static var isEnabled: Bool { CommandLine.arguments.contains(launchArgument) }
+
+    static func configureLayoutIfRequested() {
+        guard isEnabled, CommandLine.arguments.contains("--ui-test-layout") else { return }
+        UserDefaults.standard.set(260.0, forKey: "vault.layout.sidebarWidth")
+        UserDefaults.standard.set(340.0, forKey: "vault.layout.itemListWidth")
+    }
 
     /// With `--ui-test-open-codes`, start on the Codes list with its first item selected.
     static var opensOnCodes: Bool { CommandLine.arguments.contains("--ui-test-open-codes") }

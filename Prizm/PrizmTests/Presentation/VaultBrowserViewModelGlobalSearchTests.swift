@@ -27,7 +27,7 @@ final class VaultBrowserViewModelGlobalSearchTests: XCTestCase {
             vault:           vault,
             search:          SearchVaultUseCaseImpl(vault: vault),
             archive:         ArchiveVaultItemUseCaseImpl(repository: vault),
-            delete:          StubDeleteUseCase(),
+            delete:          DeleteVaultItemUseCaseImpl(repository: vault),
             permanentDelete: StubPermanentDeleteUseCase(),
             restore:         StubRestoreUseCase(),
             createFolder:     StubCreateFolder(),
@@ -125,13 +125,125 @@ final class VaultBrowserViewModelGlobalSearchTests: XCTestCase {
         XCTAssertEqual(sut.actionError, VaultError.vaultLocked.localizedDescription)
     }
 
+    private func waitForItems(_ count: Int) async throws {
+        let deadline = ContinuousClock.now + .seconds(1)
+        while sut.displayedItems.count != count, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertEqual(sut.displayedItems.count, count)
+    }
+
+    func testMultipleSelectionHidesSingleItemDetail() async throws {
+        try await waitForItems(2)
+        sut.selectedItemIDs = [sampleLogin.id]
+        XCTAssertEqual(sut.itemSelection, sampleLogin)
+
+        sut.selectedItemIDs = [sampleLogin.id, sampleCard.id]
+        XCTAssertEqual(sut.selectedItemIDs.count, 2)
+        XCTAssertNil(sut.itemSelection)
+
+        sut.selectedItemIDs.remove(sampleCard.id)
+        XCTAssertEqual(sut.itemSelection, sampleLogin)
+    }
+
+    func testProgrammaticSingleSelectionUpdatesSelectedIDs() {
+        sut.itemSelection = sampleCard
+        XCTAssertEqual(sut.selectedItemIDs, [sampleCard.id])
+        sut.itemSelection = nil
+        XCTAssertTrue(sut.selectedItemIDs.isEmpty)
+    }
+
+    func testFilteringPrunesHiddenSelectionsAndRestoresSingleDetail() async throws {
+        try await waitForItems(2)
+        sut.selectedItemIDs = [sampleLogin.id, sampleCard.id]
+        sut.searchQuery = "GitHub"
+        try await waitForItems(1)
+
+        XCTAssertEqual(sut.selectedItemIDs, [sampleLogin.id])
+        XCTAssertEqual(sut.itemSelection, sampleLogin)
+    }
+
+    func testRefreshKeepsSelectionByIDWhenItemDataChanges() async throws {
+        try await waitForItems(2)
+        sut.selectedItemIDs = [sampleLogin.id]
+        let updated = VaultItem(
+            id: sampleLogin.id, name: "Renamed login", isFavorite: true, isDeleted: false,
+            creationDate: sampleLogin.creationDate, revisionDate: .now, content: sampleLogin.content
+        )
+        await vault.populate(items: [updated], folders: [], organizations: [], collections: [], syncedAt: .now)
+        sut.refreshItems()
+        try await waitForItems(1)
+
+        XCTAssertEqual(sut.selectedItemIDs, [sampleLogin.id])
+        XCTAssertEqual(sut.itemSelection, updated)
+    }
+
+    func testSidebarChangeAndLockClearMultipleSelection() async throws {
+        try await waitForItems(2)
+        sut.selectedItemIDs = [sampleLogin.id, sampleCard.id]
+        sut.sidebarSelection = .favorites
+        await Task.yield()
+        XCTAssertTrue(sut.selectedItemIDs.isEmpty)
+
+        sut.selectedItemIDs = [sampleLogin.id, sampleCard.id]
+        sut.clearDecryptedState()
+        XCTAssertTrue(sut.selectedItemIDs.isEmpty)
+        XCTAssertNil(sut.itemSelection)
+    }
+
+    func testBatchDeleteRemovesOnlyRequestedItemsWithoutDuplicateWrites() async throws {
+        try await waitForItems(2)
+        sut.selectedItemIDs = [sampleLogin.id, sampleCard.id]
+
+        await sut.performSoftDelete(ids: [sampleLogin.id, sampleLogin.id])
+        try await waitForItems(1)
+
+        XCTAssertEqual(vault.deleteCallCount, 1)
+        XCTAssertEqual(vault.populatedItems.map(\.id), [sampleCard.id])
+        XCTAssertEqual(sut.selectedItemIDs, [sampleCard.id])
+        XCTAssertNil(sut.actionError)
+    }
+
+    func testBatchDeletePartialFailureKeepsFailedItemSelected() async throws {
+        try await waitForItems(2)
+        sut.selectedItemIDs = [sampleLogin.id, sampleCard.id]
+        vault.stubbedDeleteErrorIDs = [sampleCard.id]
+
+        await sut.performSoftDelete(ids: [sampleLogin.id, sampleCard.id])
+        try await waitForItems(1)
+
+        XCTAssertEqual(vault.deleteCallCount, 2)
+        XCTAssertEqual(sut.selectedItemIDs, [sampleCard.id])
+        XCTAssertEqual(sut.itemSelection, sampleCard)
+        XCTAssertEqual(sut.actionError, VaultError.vaultLocked.localizedDescription)
+    }
+
+    func testBatchArchiveDelegatesForEverySelectedID() async throws {
+        try await waitForItems(2)
+        sut.selectedItemIDs = [sampleLogin.id, sampleCard.id]
+
+        await sut.performArchive(ids: [sampleLogin.id, sampleCard.id], archived: true)
+
+        XCTAssertEqual(Set(vault.archiveCalls.map { $0.0 }), [sampleLogin.id, sampleCard.id])
+        XCTAssertTrue(vault.archiveCalls.allSatisfy { $0.1 })
+        XCTAssertTrue(sut.selectedItemIDs.isEmpty)
+        XCTAssertNil(sut.actionError)
+    }
+
+    func testBatchArchiveFailurePreservesSelection() async throws {
+        try await waitForItems(2)
+        sut.selectedItemIDs = [sampleLogin.id, sampleCard.id]
+        vault.archiveError = VaultError.vaultLocked
+
+        await sut.performArchive(ids: [sampleLogin.id, sampleCard.id], archived: false)
+
+        XCTAssertEqual(sut.selectedItemIDs, [sampleLogin.id, sampleCard.id])
+        XCTAssertEqual(sut.actionError, VaultError.vaultLocked.localizedDescription)
+    }
+
 }
 
 // MARK: - Stub use cases (minimal, no-op)
-
-private final class StubDeleteUseCase: DeleteVaultItemUseCase {
-    func execute(id: String) async throws {}
-}
 
 private final class StubPermanentDeleteUseCase: PermanentDeleteVaultItemUseCase {
     func execute(id: String) async throws {}

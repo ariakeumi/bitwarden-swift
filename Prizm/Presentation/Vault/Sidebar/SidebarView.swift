@@ -101,7 +101,7 @@ struct SidebarView: View {
                     selection = .newFolder
                     isNewFolderFocused = true
                 } label: {
-                    Image(systemName: "plus.circle")
+                    Image(systemName: "plus")
                         .font(.title3)
                         .symbolRenderingMode(.hierarchical)
                         .foregroundStyle(.primary)

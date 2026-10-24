@@ -27,7 +27,8 @@ struct PasswordGenerator {
     /// Generates a random character-based password.
     /// - Throws: If the randomness provider fails.
     func generatePassword(config: PasswordGeneratorConfig, provider: RandomnessProvider) throws -> String {
-        let length = max(5, min(128, config.length))
+        let range = PasswordGeneratorConfig.passwordLengthRange
+        let length = max(range.lowerBound, min(range.upperBound, config.length))
 
         // Build enabled character sets.
         var sets: [[Character]] = []

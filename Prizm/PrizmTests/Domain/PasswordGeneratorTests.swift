@@ -15,32 +15,32 @@ final class PasswordGeneratorTests: XCTestCase {
 
     // MARK: - 1.5 Random password mode
 
-    func testPasswordLength_minimum5() async throws {
+    func testPasswordLength_minimum6() async throws {
         var config = PasswordGeneratorConfig()
-        config.length = 5
+        config.length = 6
         let result = try generator.generatePassword(config: config, provider: provider)
-        XCTAssertEqual(result.count, 5)
+        XCTAssertEqual(result.count, 6)
     }
 
-    func testPasswordLength_maximum128() async throws {
+    func testPasswordLength_maximum32() async throws {
         var config = PasswordGeneratorConfig()
-        config.length = 128
+        config.length = 32
         let result = try generator.generatePassword(config: config, provider: provider)
-        XCTAssertEqual(result.count, 128)
+        XCTAssertEqual(result.count, 32)
     }
 
-    func testPasswordLength_clampedBelow5() async throws {
+    func testPasswordLength_clampedBelow6() async throws {
         var config = PasswordGeneratorConfig()
         config.length = 2
         let result = try generator.generatePassword(config: config, provider: provider)
-        XCTAssertEqual(result.count, 5)
+        XCTAssertEqual(result.count, 6)
     }
 
-    func testPasswordLength_clampedAbove128() async throws {
+    func testPasswordLength_clampedAbove32() async throws {
         var config = PasswordGeneratorConfig()
         config.length = 200
         let result = try generator.generatePassword(config: config, provider: provider)
-        XCTAssertEqual(result.count, 128)
+        XCTAssertEqual(result.count, 32)
     }
 
     func testPassword_uppercaseOnly() async throws {
@@ -56,7 +56,7 @@ final class PasswordGeneratorTests: XCTestCase {
 
     func testPassword_allSetsPool_containsAllTypes() async throws {
         var config = PasswordGeneratorConfig()
-        config.length = 128
+        config.length = 32
         let result = try generator.generatePassword(config: config, provider: provider)
         XCTAssertTrue(result.contains(where: { $0.isUppercase }))
         XCTAssertTrue(result.contains(where: { $0.isLowercase }))
@@ -67,7 +67,7 @@ final class PasswordGeneratorTests: XCTestCase {
     func testPassword_atLeastOnePerSet_guarantee() async throws {
         // With all sets enabled and short length, each set must appear at least once.
         var config = PasswordGeneratorConfig()
-        config.length = 5
+        config.length = 6
         // Run multiple times with different seeds.
         for seed in [Array<UInt8>(repeating: 0, count: 256),
                      Array<UInt8>(repeating: 127, count: 256),
@@ -85,7 +85,7 @@ final class PasswordGeneratorTests: XCTestCase {
         let ambiguous: Set<Character> = ["0", "O", "I", "l", "1", "|"]
         var config = PasswordGeneratorConfig()
         config.avoidAmbiguous = true
-        config.length = 128
+        config.length = 32
         let result = try generator.generatePassword(config: config, provider: provider)
         for char in result {
             XCTAssertFalse(ambiguous.contains(char), "Found ambiguous char '\(char)' in result")
@@ -94,7 +94,7 @@ final class PasswordGeneratorTests: XCTestCase {
 
     func testPassword_noWhitespace_withSymbolsEnabled() async throws {
         var config = PasswordGeneratorConfig()
-        config.length = 128
+        config.length = 32
         for seed in [Array<UInt8>(repeating: 0, count: 256),
                      Array<UInt8>(repeating: 127, count: 256),
                      Array<UInt8>(repeating: 255, count: 256),

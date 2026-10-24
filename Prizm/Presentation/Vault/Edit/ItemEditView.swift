@@ -4,7 +4,7 @@ import SwiftUI
 
 /// Modal sheet container for editing a vault item.
 ///
-/// Owns the Save and Discard toolbar buttons, the per-type edit form, and the inline
+/// Owns the Save, Discard and Delete toolbar buttons, the per-type edit form, and the inline
 /// error banner shown on save failure. Sheet presentation is managed by the caller
 /// (`ItemDetailView`) which toggles `isPresented` based on `viewModel.isDismissed`.
 ///
@@ -75,44 +75,40 @@ struct ItemEditView: View {
                     // multiple collections, extra collection IDs (outside this org) are
                     // preserved on save; only the selected collection within this org changes.
                     let orgCollectionIds = Set(orgCollections.map(\.id))
-                    DetailSectionCard(String(localized: "Collection")) {
-                        HStack {
-                            Picker(selection: Binding(
-                                get: {
-                                    viewModel.draft.collectionIds.first { orgCollectionIds.contains($0) }
-                                },
-                                set: { newId in
-                                    // Replace only the collection IDs that belong to this org;
-                                    // preserve any IDs from other orgs (should not exist in practice
-                                    // but guards against cross-org data loss).
-                                    let otherIds = viewModel.draft.collectionIds.filter { !orgCollectionIds.contains($0) }
-                                    viewModel.draft.collectionIds = otherIds + (newId.map { [$0] } ?? [])
-                                }
-                            )) {
-                                Text("None").tag(String?.none)
-                                ForEach(orgCollections) { col in
-                                    Text(col.name).tag(Optional(col.id))
-                                }
-                            } label: { EmptyView() }
-                            .pickerStyle(.menu)
-                            Spacer()
+                    DetailSectionCard {
+                        Picker("Collection", selection: Binding(
+                            get: {
+                                viewModel.draft.collectionIds.first { orgCollectionIds.contains($0) }
+                            },
+                            set: { newId in
+                                // Replace only the collection IDs that belong to this org;
+                                // preserve any IDs from other orgs (should not exist in practice
+                                // but guards against cross-org data loss).
+                                let otherIds = viewModel.draft.collectionIds.filter { !orgCollectionIds.contains($0) }
+                                viewModel.draft.collectionIds = otherIds + (newId.map { [$0] } ?? [])
+                            }
+                        )) {
+                            Text("None").tag(String?.none)
+                            ForEach(orgCollections) { col in
+                                Text(col.name).tag(Optional(col.id))
+                            }
                         }
+                        .pickerStyle(.menu)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.vertical, Spacing.rowVertical)
                         .padding(.horizontal, Spacing.rowHorizontal)
                     }
                 }
             } else if !viewModel.folders.isEmpty {
-                DetailSectionCard(String(localized: "Folder")) {
-                    HStack {
-                        Picker(selection: $viewModel.draft.folderId) {
-                            Text("None").tag(String?.none)
-                            ForEach(viewModel.folders) { folder in
-                                Text(folder.name).tag(Optional(folder.id))
-                            }
-                        } label: { EmptyView() }
-                        .pickerStyle(.menu)
-                        Spacer()
+                DetailSectionCard {
+                    Picker("Folder", selection: $viewModel.draft.folderId) {
+                        Text("None").tag(String?.none)
+                        ForEach(viewModel.folders) { folder in
+                            Text(folder.name).tag(Optional(folder.id))
+                        }
                     }
+                    .pickerStyle(.menu)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, Spacing.rowVertical)
                     .padding(.horizontal, Spacing.rowHorizontal)
                 }
@@ -122,18 +118,6 @@ struct ItemEditView: View {
 
             // Per-type edit form.
             typeEditForm
-
-            // Delete button — shown only when editing an existing item (not during creation).
-            if viewModel.isEditing, onDelete != nil {
-                Button("Delete Item") {
-                    showingDeleteAlert = true
-                }
-                .foregroundStyle(.red)
-                .padding(.vertical, Spacing.cardTop)
-                .padding(.horizontal, Spacing.pageMargin)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .accessibilityIdentifier(AccessibilityID.Edit.deleteButton)
-            }
         }
         .frame(
             minWidth: 480,
@@ -142,6 +126,17 @@ struct ItemEditView: View {
             idealHeight: isSecureNote ? EditorLayout.noteSheetHeight : nil
         )
         .toolbar {
+            // Share the sheet's bottom action row so deletion does not reduce the editor height.
+            if viewModel.isEditing, onDelete != nil {
+                ToolbarItem(placement: .destructiveAction) {
+                    Button("Delete Item") {
+                        showingDeleteAlert = true
+                    }
+                    .foregroundStyle(.red)
+                    .accessibilityIdentifier(AccessibilityID.Edit.deleteButton)
+                }
+            }
+
             ToolbarItem(placement: .cancellationAction) {
                 Button("Discard") {
                     handleDiscard()

@@ -14,7 +14,7 @@ final class AppContainer: ObservableObject {
 
     let apiClient:     PrizmAPIClientImpl
     let crypto:        PrizmCryptoServiceImpl
-    let keychain:      KeychainServiceImpl
+    let keychain:      any KeychainService
     let biometricKeychain: BiometricKeychainServiceImpl
     let vaultStore:    VaultRepositoryImpl
     let faviconLoader: FaviconLoader
@@ -71,7 +71,14 @@ final class AppContainer: ObservableObject {
     init() {
         let api           = PrizmAPIClientImpl()
         let crypto        = PrizmCryptoServiceImpl()
-        let keychain      = KeychainServiceImpl()
+        #if DEBUG
+        // Seeded UI journeys must never read the developer's real credentials.
+        let keychain: any KeychainService = UITestFixtures.isEnabled
+            ? UITestFixtures.InMemoryKeychain()
+            : KeychainServiceImpl()
+        #else
+        let keychain = KeychainServiceImpl()
+        #endif
         let biometricKeychain = BiometricKeychainServiceImpl()
         let keyCache      = VaultKeyCache()
         let orgKeyCache   = OrgKeyCache()
@@ -162,7 +169,7 @@ final class AppContainer: ObservableObject {
 
     /// Creates an `UnlockViewModel` for a returning user with a stored session.
     func makeUnlockViewModel(account: Account) -> UnlockViewModel {
-        UnlockViewModel(auth: authRepository, sync: syncUseCase, account: account, embeddedBiometric: authRepository)
+        UnlockViewModel(auth: authRepository, account: account, embeddedBiometric: authRepository)
     }
 
     /// Creates the once-per-second tracker that keeps displayed TOTP codes current.

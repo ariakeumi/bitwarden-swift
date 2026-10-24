@@ -14,6 +14,7 @@ final class MockVaultRepository: VaultRepository {
     private(set) var populatedFolders: [Folder] = []
     private(set) var populatedOrganizations: [Organization] = []
     private(set) var populatedCollections: [OrgCollection] = []
+    private(set) var populateCalled = false
     private(set) var clearVaultCalled: Bool = false
 
     // MARK: - update(_:) stubbing
@@ -35,6 +36,7 @@ final class MockVaultRepository: VaultRepository {
 
     func populate(items: [VaultItem], folders: [Folder], organizations: [Organization],
                   collections: [OrgCollection], syncedAt: Date) async {
+        populateCalled = true
         populatedItems         = items
         populatedFolders       = folders
         populatedOrganizations = organizations
@@ -139,12 +141,14 @@ final class MockVaultRepository: VaultRepository {
     // MARK: - deleteItem stubbing
 
     var stubbedDeleteError: Error?
+    var stubbedDeleteErrorIDs: Set<String> = []
     private(set) var deleteCallCount: Int = 0
     private(set) var lastDeletedId: String?
 
     func deleteItem(id: String) async throws {
         deleteCallCount += 1
         lastDeletedId = id
+        if stubbedDeleteErrorIDs.contains(id) { throw VaultError.vaultLocked }
         if let error = stubbedDeleteError { throw error }
         populatedItems.removeAll { $0.id == id }
     }

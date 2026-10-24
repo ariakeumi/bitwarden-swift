@@ -7,7 +7,6 @@ final class UnlockViewModelBiometricTests: XCTestCase {
 
     private var sut:          UnlockViewModel!
     private var mockAuth:     MockAuthRepository!
-    private var mockSync:     MockSyncUseCase!
     private var cancellables: Set<AnyCancellable> = []
 
     private let stubAccount = Account(
@@ -23,8 +22,7 @@ final class UnlockViewModelBiometricTests: XCTestCase {
     override func setUp() async throws {
         try await super.setUp()
         mockAuth = MockAuthRepository()
-        mockSync = MockSyncUseCase()
-        sut      = UnlockViewModel(auth: mockAuth, sync: mockSync, account: stubAccount)
+        sut      = UnlockViewModel(auth: mockAuth, account: stubAccount)
         UserDefaults.standard.removeObject(forKey: "biometricUnlockEnabled")
         UserDefaults.standard.removeObject(forKey: "biometricEnrollmentPromptShown")
     }

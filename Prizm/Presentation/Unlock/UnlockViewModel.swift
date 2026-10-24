@@ -9,7 +9,6 @@ enum UnlockFlowState: Equatable {
     case unlock
     case restoring
     case loading
-    case syncing(message: String)
     case vault
     /// Returned to login (triggered by "Sign in with a different account").
     case login
@@ -20,7 +19,8 @@ enum UnlockFlowState: Equatable {
 /// ViewModel for the vault unlock screen (User Story 2).
 ///
 /// The user has a stored session; this screen re-derives the vault key from the
-/// master password locally (no network call) then re-syncs the vault.
+/// master password locally (no network call). RootViewModel starts background sync
+/// after the authenticated session has entered the vault browser.
 @MainActor
 final class UnlockViewModel: ObservableObject {
 
@@ -35,7 +35,6 @@ final class UnlockViewModel: ObservableObject {
     // MARK: - Dependencies
 
     private let auth:             any AuthRepository
-    private let sync:             any SyncUseCase
     private let account:          Account
     private let embeddedBiometric: (any EmbeddedBiometricUnlock)?
     private let logger = Logger(subsystem: "com.prizm", category: "UnlockViewModel")
@@ -57,12 +56,10 @@ final class UnlockViewModel: ObservableObject {
 
     init(
         auth: any AuthRepository,
-        sync: any SyncUseCase,
         account: Account,
         embeddedBiometric: (any EmbeddedBiometricUnlock)? = nil
     ) {
         self.auth              = auth
-        self.sync              = sync
         self.account           = account
         self.embeddedBiometric = embeddedBiometric
     }
@@ -87,7 +84,7 @@ final class UnlockViewModel: ObservableObject {
                     flowState = .unlock
                     return
                 }
-                await performSync()
+                flowState = .vault
             } catch {
                 logger.error("Session restoration unavailable; requiring explicit unlock")
                 flowState = .unlock
@@ -114,7 +111,7 @@ final class UnlockViewModel: ObservableObject {
                 // Clear the password field after a successful unlock so the plaintext
                 // does not linger in the published property.
                 password = ""
-                await checkEnrollmentOrSync()
+                checkEnrollmentOrEnterVault()
             } catch let err as AuthError {
                 logger.error("Unlock failed: \(err.localizedDescription, privacy: .public)")
                 errorMessage = err.errorDescription
@@ -127,7 +124,7 @@ final class UnlockViewModel: ObservableObject {
         }
     }
 
-    /// Attempts biometric unlock. On success, proceeds to sync.
+    /// Attempts biometric unlock. On success, enters the vault browser.
     /// On cancellation, re-arms the sensor immediately (always-armed behaviour —
     /// design Decision 2). On lockout or invalidation, shows an error and stops.
     func unlockWithBiometrics() {
@@ -135,7 +132,7 @@ final class UnlockViewModel: ObservableObject {
             do {
                 _ = try await auth.unlockWithBiometrics()
                 lastBiometricInvalidated = false
-                await checkEnrollmentOrSync()
+                checkEnrollmentOrEnterVault()
             } catch let err as AuthError where err == .biometricInvalidated {
                 lastBiometricInvalidated = true
                 errorMessage = err.errorDescription
@@ -170,7 +167,7 @@ final class UnlockViewModel: ObservableObject {
             do {
                 _ = try await provider.unlockWithBiometrics(context: biometricContext)
                 lastBiometricInvalidated = false
-                await checkEnrollmentOrSync()
+                checkEnrollmentOrEnterVault()
             } catch let err as AuthError where err == .biometricInvalidated {
                 lastBiometricInvalidated = true
                 errorMessage = err.errorDescription
@@ -220,7 +217,7 @@ final class UnlockViewModel: ObservableObject {
             }
             UserDefaults.standard.set(true, forKey: "biometricEnrollmentPromptShown")
             showEnrollmentPrompt = false
-            await performSync()
+            flowState = .vault
         }
     }
 
@@ -228,7 +225,7 @@ final class UnlockViewModel: ObservableObject {
     func dismissEnrollmentPrompt() {
         UserDefaults.standard.set(true, forKey: "biometricEnrollmentPromptShown")
         showEnrollmentPrompt = false
-        Task { await performSync() }
+        flowState = .vault
     }
 
     /// Clears session and returns to the login screen (FR-039).
@@ -247,11 +244,11 @@ final class UnlockViewModel: ObservableObject {
     // MARK: - Private
 
     /// After a successful unlock, checks whether to show the enrollment prompt sheet
-    /// before proceeding to sync.
+    /// before entering the vault browser.
     ///
     /// Uses `auth.deviceBiometricCapable` (not `biometricUnlockAvailable`) so the check
     /// is mockable in tests and independent of the UserDefaults enabled flag.
-    private func checkEnrollmentOrSync() async {
+    private func checkEnrollmentOrEnterVault() {
         let capable        = auth.deviceBiometricCapable
         let alreadyEnabled = UserDefaults.standard.bool(forKey: "biometricUnlockEnabled")
         let promptShown    = UserDefaults.standard.bool(forKey: "biometricEnrollmentPromptShown")
@@ -259,22 +256,9 @@ final class UnlockViewModel: ObservableObject {
         if capable && !alreadyEnabled && !promptShown {
             enrollmentReason    = lastBiometricInvalidated ? .reEnrollAfterInvalidation : .firstTime
             showEnrollmentPrompt = true
-            // performSync() will be called by confirmEnrollBiometric() or dismissEnrollmentPrompt().
+            // Enrollment completion or dismissal will enter the vault browser.
             return
         }
-        await performSync()
-    }
-
-    private func performSync() async {
-        flowState = .syncing(message: "Preparing…")
-        do {
-            _ = try await sync.execute(progress: { [weak self] message in
-                Task { @MainActor [weak self] in self?.flowState = .syncing(message: message) }
-            })
-            flowState = .vault
-        } catch {
-            logger.error("Post-unlock sync failed (non-fatal): \(error.localizedDescription, privacy: .public)")
-            flowState = .vault
-        }
+        flowState = .vault
     }
 }

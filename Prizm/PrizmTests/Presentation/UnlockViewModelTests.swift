@@ -7,7 +7,6 @@ final class UnlockViewModelTests: XCTestCase {
 
     private var sut:          UnlockViewModel!
     private var mockAuth:     MockAuthRepository!
-    private var mockSync:     MockSyncUseCase!
     private var cancellables: Set<AnyCancellable> = []
 
     private let stubAccount = Account(
@@ -23,8 +22,7 @@ final class UnlockViewModelTests: XCTestCase {
     override func setUp() async throws {
         try await super.setUp()
         mockAuth = MockAuthRepository()
-        mockSync = MockSyncUseCase()
-        sut      = UnlockViewModel(auth: mockAuth, sync: mockSync, account: stubAccount)
+        sut      = UnlockViewModel(auth: mockAuth, account: stubAccount)
     }
 
     override func tearDown() async throws {
@@ -86,6 +84,30 @@ final class UnlockViewModelTests: XCTestCase {
     }
 
     // MARK: - email property
+
+    func testPasswordUnlockEntersVaultWithoutRunningSync() async throws {
+        sut.password = "SuperSecret1!"
+        let enteredVault = expectation(description: "authentication opens the vault")
+        sut.$flowState.filter { $0 == .vault }.first()
+            .sink { _ in enteredVault.fulfill() }.store(in: &cancellables)
+
+        sut.unlock()
+        await fulfillment(of: [enteredVault], timeout: 1)
+
+        XCTAssertTrue(mockAuth.unlockWithPasswordCalled)
+        XCTAssertEqual(sut.password, "")
+    }
+
+    func testBiometricUnlockEntersVaultWithoutRunningSync() async throws {
+        let enteredVault = expectation(description: "biometric authentication opens the vault")
+        sut.$flowState.filter { $0 == .vault }.first()
+            .sink { _ in enteredVault.fulfill() }.store(in: &cancellables)
+
+        sut.unlockWithBiometrics()
+        await fulfillment(of: [enteredVault], timeout: 1)
+
+        XCTAssertTrue(mockAuth.unlockWithBiometricsCalled)
+    }
 
     /// email property returns the stored account's email address.
     func testEmail_returnsStoredAccountEmail() {

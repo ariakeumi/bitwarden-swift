@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - ItemRowView
 
-/// A single row in the item list, showing favicon/type-icon, name, subtitle, and favorite star.
+/// A single row in the item list, showing favicon/card-network/type icon, name, and subtitle.
 ///
 /// FR-021: type-specific subtitle
 ///   - Login:       username
@@ -23,12 +23,7 @@ struct ItemRowView: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            FaviconView(
-                domain:    primaryDomain(for: item),
-                itemType:  itemType(for: item),
-                loader:    faviconLoader,
-                size:      26
-            )
+            VaultItemIcon(item: item, loader: faviconLoader, size: 26)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(styledName)
@@ -112,24 +107,6 @@ struct ItemRowView: View {
         case .sshKey(let k):
             if let fp = k.keyFingerprint, !fp.isEmpty { return fp }
             return String(localized: "[No fingerprint]")
-        }
-    }
-
-    // MARK: - Favicon helpers
-
-    private func primaryDomain(for item: VaultItem) -> String? {
-        guard case .login(let l) = item.content,
-              let first = l.uris.first else { return nil }
-        return URL(string: first.uri)?.host
-    }
-
-    private func itemType(for item: VaultItem) -> ItemType {
-        switch item.content {
-        case .login:      return .login
-        case .card:       return .card
-        case .identity:   return .identity
-        case .secureNote: return .secureNote
-        case .sshKey:     return .sshKey
         }
     }
 }

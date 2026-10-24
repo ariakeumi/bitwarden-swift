@@ -2,7 +2,13 @@
 
 ## Unreleased
 
-- Add a sort menu above the item list with saved name, modification date, and creation date ordering.
+- Support native multiple selection in vault lists with Command-click, Shift-click, Select All, and batch Archive/Move to Trash actions.
+
+- Open the vault immediately after session restoration or unlock and synchronize in the background, with visible sync failures and cancellation on lock/sign-out.
+
+- Add a standalone password/passphrase generator via ⌘G or File → Password Generator, with 6–32 character passwords, configurable options, copy feedback, and automatic preview/clipboard clearing.
+
+- Add a native toolbar sort menu next to Add, with saved name, modification date, and creation date ordering.
 
 - Add Bitwarden-compatible Archive and Unarchive actions, an Archive sidebar with search,
   and archive-state preservation during edits, moves, attachment updates and delete/restore.

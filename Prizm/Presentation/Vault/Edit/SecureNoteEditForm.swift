@@ -20,7 +20,7 @@ struct SecureNoteEditForm: View {
                         ))
                         .font(Typography.fieldValue)
                         .scrollContentBackground(.hidden)
-                        .frame(height: max(EditorLayout.minimumNoteHeight, geometry.size.height * 0.7))
+                        .frame(minHeight: EditorLayout.minimumNoteHeight, maxHeight: .infinity)
                         .padding(.vertical, Spacing.rowVertical)
                         .padding(.horizontal, Spacing.rowHorizontal)
                         .accessibilityLabel("Note")
@@ -29,6 +29,7 @@ struct SecureNoteEditForm: View {
 
                     CustomFieldsEditSection(fields: $draft.customFields)
                 }
+                .frame(minHeight: geometry.size.height, alignment: .top)
             }
         }
     }

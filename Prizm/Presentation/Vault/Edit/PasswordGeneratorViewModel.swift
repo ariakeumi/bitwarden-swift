@@ -1,10 +1,8 @@
 import Combine
 import SwiftUI
 
-/// ViewModel for the password generator popover.
-/// Owns the config, generated value, and clipboard logic.
-/// Instantiated as `@StateObject` inside `EditFieldRow` so plaintext
-/// is released when the popover closes (design D7, Constitution §III).
+/// Shared generator state for the editor popover and standalone window.
+/// Only options persist; the generated value expires and is cleared on dismissal.
 @MainActor
 final class PasswordGeneratorViewModel: ObservableObject {
 
@@ -26,20 +24,30 @@ final class PasswordGeneratorViewModel: ObservableObject {
 
     @Published private(set) var generatedValue: String = ""
     @Published private(set) var errorMessage: String?
+    @Published private(set) var hasCopied = false
 
     // MARK: - Dependencies
 
     private let provider: RandomnessProvider
     private let generator = PasswordGenerator()
     private let defaults: UserDefaults
-    private var clipboardClearTask: Task<Void, Never>?
+    private let pasteboard: NSPasteboard
+    private let sensitiveValueTimeout: Duration
+    private var previewClearTask: Task<Void, Never>?
     private var isInitializing = true
 
     // MARK: - Init
 
-    init(provider: RandomnessProvider, defaults: UserDefaults = .standard) {
+    init(
+        provider: RandomnessProvider,
+        defaults: UserDefaults = .standard,
+        pasteboard: NSPasteboard = .general,
+        sensitiveValueTimeout: Duration = .seconds(30)
+    ) {
         self.provider = provider
         self.defaults = defaults
+        self.pasteboard = pasteboard
+        self.sensitiveValueTimeout = sensitiveValueTimeout
         let config = PasswordGeneratorConfig.load(from: defaults)
         self.mode = config.mode
         self.length = config.length
@@ -57,13 +65,15 @@ final class PasswordGeneratorViewModel: ObservableObject {
     }
 
     deinit {
-        clipboardClearTask?.cancel()
+        previewClearTask?.cancel()
     }
 
     // MARK: - Actions
 
     func generate() {
         guard !isInitializing else { return }
+        previewClearTask?.cancel()
+        hasCopied = false
         do {
             let config = currentConfig()
             switch mode {
@@ -74,26 +84,49 @@ final class PasswordGeneratorViewModel: ObservableObject {
             }
             errorMessage = nil
             config.save(to: defaults)
+            previewClearTask = Task { [weak self, sensitiveValueTimeout] in
+                do {
+                    try await Task.sleep(for: sensitiveValueTimeout)
+                    self?.clearGeneratedValue()
+                } catch is CancellationError {
+                    // A new value or dismissal replaces this preview's timeout.
+                } catch {
+                    self?.clearGeneratedValue()
+                }
+            }
         } catch {
             errorMessage = String(localized: "Generation failed: \(error.localizedDescription)")
             generatedValue = ""
         }
     }
 
-    func copyToClipboard() {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(generatedValue, forType: .string)
+    func clearGeneratedValue() {
+        previewClearTask?.cancel()
+        previewClearTask = nil
+        generatedValue = ""
+        hasCopied = false
+    }
 
-        clipboardClearTask?.cancel()
-        clipboardClearTask = Task {
+    func copyToClipboard() {
+        guard !generatedValue.isEmpty, errorMessage == nil else { return }
+        VaultBrowserViewModel.writeConcealed(generatedValue, to: pasteboard)
+        hasCopied = true
+        let changeCount = pasteboard.changeCount
+
+        // Cleanup outlives the window without retaining plaintext or its model.
+        // changeCount also protects newer clipboard contents, even identical text.
+        Task { [pasteboard, changeCount, sensitiveValueTimeout] in
             do {
-                try await Task.sleep(for: .seconds(30))
-                if pasteboard.string(forType: .string) == generatedValue {
+                try await Task.sleep(for: sensitiveValueTimeout)
+                if pasteboard.changeCount == changeCount {
                     pasteboard.clearContents()
                 }
+            } catch is CancellationError {
+                // This independent task is not cancelled when the generator closes.
             } catch {
-                // Task cancelled — do nothing.
+                if pasteboard.changeCount == changeCount {
+                    pasteboard.clearContents()
+                }
             }
         }
     }

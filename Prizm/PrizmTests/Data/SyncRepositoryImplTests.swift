@@ -131,6 +131,36 @@ final class SyncRepositoryImplTests: XCTestCase {
 
     // MARK: - 8.2 SyncRepositoryImpl populates orgs and collections (task 8.2)
 
+    func testCancelledSyncDoesNotPublishVault() async throws {
+        let sut = self.sut!
+        let task = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await sut.sync(progress: { _ in })
+        }
+
+        do {
+            _ = try await task.value
+            XCTFail("A cancelled sync must throw")
+        } catch {
+            XCTAssertTrue(error is CancellationError)
+        }
+        XCTAssertFalse(mockVault.populateCalled)
+    }
+
+    func testCancellationBeforeDecryptionDoesNotPublishVault() async throws {
+        do {
+            _ = try await sut.sync(progress: { message in
+                if message.hasPrefix("Decrypting") {
+                    withUnsafeCurrentTask { $0?.cancel() }
+                }
+            })
+            XCTFail("Cancellation must stop decryption and publication")
+        } catch {
+            XCTAssertTrue(error is CancellationError)
+        }
+        XCTAssertFalse(mockVault.populateCalled)
+    }
+
     /// sync() populates VaultRepository with decoded organizations and collections.
     ///
     /// This test FAILS until SyncRepositoryImpl.sync() populates organizations and collections

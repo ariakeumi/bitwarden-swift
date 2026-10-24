@@ -1,8 +1,8 @@
 import Foundation
 
 /// Fetches the encrypted vault from the server and populates the in-memory store.
-/// Called after unlock and when the user requests a manual sync.
-/// No background sync or periodic polling.
+/// Called in the background after session restoration/unlock, after login,
+/// and when the user requests a manual sync. No periodic polling.
 /// Implemented by `SyncRepositoryImpl` in the Data layer.
 protocol SyncRepository: Actor {
 

@@ -6,16 +6,19 @@ final class PasswordGeneratorViewModelTests: XCTestCase {
 
     private var defaults: UserDefaults!
     private var provider: MockRandomnessProvider!
+    private var pasteboard: NSPasteboard!
 
     override func setUp() async throws {
         try await super.setUp()
         defaults = UserDefaults(suiteName: "PasswordGeneratorViewModelTests")!
         defaults.removePersistentDomain(forName: "PasswordGeneratorViewModelTests")
         provider = MockRandomnessProvider()
+        pasteboard = NSPasteboard(name: NSPasteboard.Name("com.prizm.generator.tests.\(UUID().uuidString)"))
     }
 
     override func tearDown() async throws {
         defaults.removePersistentDomain(forName: "PasswordGeneratorViewModelTests")
+        pasteboard.releaseGlobally()
         try await super.tearDown()
     }
 
@@ -39,21 +42,78 @@ final class PasswordGeneratorViewModelTests: XCTestCase {
     }
 
     func testCopyToClipboard_writesToPasteboard() {
-        let vm = PasswordGeneratorViewModel(provider: provider, defaults: defaults)
+        let vm = PasswordGeneratorViewModel(provider: provider, defaults: defaults, pasteboard: pasteboard)
         vm.copyToClipboard()
-        let pasted = NSPasteboard.general.string(forType: .string)
+        let pasted = pasteboard.string(forType: .string)
         XCTAssertEqual(pasted, vm.generatedValue)
+        XCTAssertTrue(pasteboard.types?.contains(VaultBrowserViewModel.concealedType) == true)
+        XCTAssertTrue(vm.hasCopied)
+    }
+
+    func testClearGeneratedValueReleasesPreviewAndRegenerateRestoresIt() {
+        let vm = PasswordGeneratorViewModel(provider: provider, defaults: defaults)
+        vm.clearGeneratedValue()
+        XCTAssertTrue(vm.generatedValue.isEmpty)
+        vm.generate()
+        XCTAssertFalse(vm.generatedValue.isEmpty)
+        XCTAssertFalse(vm.hasCopied)
+    }
+
+    func testPreviewExpires() async throws {
+        let vm = PasswordGeneratorViewModel(provider: provider, defaults: defaults, sensitiveValueTimeout: .milliseconds(30))
+        try await waitUntil { vm.generatedValue.isEmpty }
+    }
+
+    func testCopiedValueExpiresEvenAfterRegenerationAndModelRelease() async throws {
+        var vm: PasswordGeneratorViewModel? = PasswordGeneratorViewModel(
+            provider: provider, defaults: defaults, pasteboard: pasteboard, sensitiveValueTimeout: .milliseconds(60)
+        )
+        weak var releasedVM = vm
+        vm?.copyToClipboard()
+        vm?.length = 24
+        vm?.clearGeneratedValue()
+        vm = nil
+        XCTAssertNil(releasedVM, "Clipboard cleanup must not retain the generated preview or its model")
+        try await waitUntil { self.pasteboard.string(forType: .string) == nil }
+    }
+
+    func testClipboardExpirationPreservesNewerContents() async throws {
+        let vm = PasswordGeneratorViewModel(
+            provider: provider, defaults: defaults, pasteboard: pasteboard, sensitiveValueTimeout: .milliseconds(30)
+        )
+        vm.copyToClipboard()
+        pasteboard.clearContents()
+        pasteboard.setString("new clipboard contents", forType: .string)
+        try await waitUntil { vm.generatedValue.isEmpty }
+        XCTAssertEqual(pasteboard.string(forType: .string), "new clipboard contents")
+    }
+
+    func testEmptyPreviewCannotReplaceClipboardContents() {
+        let vm = PasswordGeneratorViewModel(provider: provider, defaults: defaults, pasteboard: pasteboard)
+        vm.clearGeneratedValue()
+        pasteboard.setString("existing clipboard contents", forType: .string)
+        vm.copyToClipboard()
+        XCTAssertEqual(pasteboard.string(forType: .string), "existing clipboard contents")
+        XCTAssertFalse(vm.hasCopied)
+    }
+
+    private func waitUntil(_ condition: @escaping () -> Bool) async throws {
+        let deadline = ContinuousClock.now + .seconds(2)
+        while !condition(), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(condition())
     }
 
     func testSettingsPersisted_toUserDefaults() {
         let vm = PasswordGeneratorViewModel(provider: provider, defaults: defaults)
-        vm.length = 42
+        vm.length = 24
         vm.mode = .passphrase
 
         // Load a new VM from the same defaults — should restore.
         let provider2 = MockRandomnessProvider()
         let vm2 = PasswordGeneratorViewModel(provider: provider2, defaults: defaults)
-        XCTAssertEqual(vm2.length, 42)
+        XCTAssertEqual(vm2.length, 24)
         XCTAssertEqual(vm2.mode, .passphrase)
     }
 

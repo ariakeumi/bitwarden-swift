@@ -119,6 +119,7 @@ The app is open source. Verify these claims by reading the code. See [SECURITY.m
 | ⌘4 / ⌘5 / ⌘6 | Login / Card / Identity |
 | ⌘7 / ⌘8 / ⌘9 | Secure Note / SSH Key / Trash |
 | ⌘F | Global search |
+| ⌘G | Open password generator |
 | ⌘N | New item |
 | ⌘L | Lock vault |
 | ⌘E | Edit selected item |

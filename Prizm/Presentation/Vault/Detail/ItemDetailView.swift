@@ -107,12 +107,7 @@ struct ItemDetailView: View {
     @ViewBuilder
     private func itemHeader(for item: VaultItem) -> some View {
         HStack(alignment: .center, spacing: 12) {
-            FaviconView(
-                domain:   primaryDomain(for: item),
-                itemType: itemType(for: item),
-                loader:   faviconLoader,
-                size:     36
-            )
+            VaultItemIcon(item: item, loader: faviconLoader, size: 36)
             Text(item.name.isEmpty ? " " : item.name)
                 .font(Typography.pageTitle)
                 .accessibilityIdentifier(AccessibilityID.Detail.itemName)
@@ -184,23 +179,6 @@ struct ItemDetailView: View {
         editViewModel = makeEditViewModel(item)
         isEditSheetPresented = true
         onEditSheetChanged?(true)
-    }
-
-    // MARK: - Helpers
-
-    private func primaryDomain(for item: VaultItem) -> String? {
-        guard case .login(let l) = item.content, let first = l.uris.first else { return nil }
-        return URL(string: first.uri)?.host
-    }
-
-    private func itemType(for item: VaultItem) -> ItemType {
-        switch item.content {
-        case .login:      .login
-        case .card:       .card
-        case .identity:   .identity
-        case .secureNote: .secureNote
-        case .sshKey:     .sshKey
-        }
     }
 
     // MARK: - Attachments section

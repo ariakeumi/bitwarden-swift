@@ -52,57 +52,36 @@ enum ItemListSortOrder: String, CaseIterable {
 ///
 /// Items are sorted locally using the user's saved preference.
 /// An empty state message is shown when the list is empty (FR-042).
-/// Each row has a context menu with a "Delete" action that moves the item to Trash.
+/// Native multi-selection and context menus share stable IDs across syncs and edits.
 struct ItemListView: View {
 
     let items:         [VaultItem]
-    @Binding var selection: VaultItem?
+    @Binding var selection: Set<String>
     let faviconLoader: FaviconLoader
+    @Binding var sortOrder: ItemListSortOrder
     var searchQuery:   String? = nil
     /// Organizations list for resolving org names shown on item rows (6.1).
     var organizations: [Organization] = []
-    /// Called when the user confirms moving an item to Trash from the row context menu.
+    /// Called when the user confirms moving the contextual selection to Trash.
     /// Nil disables the delete context-menu action (e.g. when trash actions are unavailable).
-    var onDelete: ((String) async -> Void)? = nil
+    var onDelete: (([String]) async -> Void)? = nil
     var isArchive: Bool = false
-    var onArchive: ((VaultItem) -> Void)? = nil
+    var onArchive: (([VaultItem]) -> Void)? = nil
     var onToggleFavorite: ((VaultItem) -> Void)? = nil
 
-    // Tracks which item is pending a soft-delete confirmation alert.
-    @State private var itemToDelete:    VaultItem? = nil
+    // Snapshot the full contextual selection before showing confirmation.
+    @State private var itemIDsToDelete: [String] = []
+    @State private var itemNameToDelete: String?
     @State private var showDeleteAlert: Bool       = false
     @FocusState private var isListFocused: Bool
     @State private var didFocusList = false
-    @AppStorage("vault.list.sortOrder") private var sortOrder: ItemListSortOrder = .nameAscending
 
     private var sections: [(letter: String?, items: [VaultItem])] {
         sortOrder.sections(for: items)
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Spacer()
-                Menu {
-                    Picker("Sort", selection: $sortOrder) {
-                        ForEach(ItemListSortOrder.allCases, id: \.self) { order in
-                            Text(order.title).tag(order)
-                        }
-                    }
-                    .pickerStyle(.inline)
-                } label: {
-                    Label("Sort", systemImage: "arrow.up.arrow.down")
-                }
-                .fixedSize()
-                .help("Sort items")
-                .accessibilityLabel("Sort items")
-                .accessibilityValue(sortOrder.title)
-                .accessibilityIdentifier(AccessibilityID.ItemList.sortMenu)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            Divider()
-
+        Group {
             if items.isEmpty {
                 ContentUnavailableView {
                     Label(isArchive ? String(localized: "No Archived Items") : String(localized: "No Items"),
@@ -118,34 +97,39 @@ struct ItemListView: View {
                             ForEach(section.items, id: \.id) { item in
                                 ItemRowView(item: item, faviconLoader: faviconLoader, searchQuery: searchQuery,
                                             orgName: orgName(for: item))
-                                    .tag(item)
+                                    .tag(item.id)
                                     .draggable(item.id)
                                     .accessibilityIdentifier(AccessibilityID.ItemList.row(item.id))
-                                    .contextMenu {
-                                        if let onToggleFavorite {
-                                            Button(item.isFavorite ? "Unfavorite" : "Favorite") {
-                                                onToggleFavorite(item)
-                                            }
-                                        }
-                                        if let onArchive {
-                                            Button(item.isArchived ? String(localized: "Unarchive") : String(localized: "Archive")) {
-                                                onArchive(item)
-                                            }
-                                            .accessibilityIdentifier("archive.contextAction")
-                                        }
-                                        if onDelete != nil {
-                                            Button("Delete", role: .destructive) {
-                                                itemToDelete    = item
-                                                showDeleteAlert = true
-                                            }
-                                        }
-                                    }
                             }
                         } header: {
                             if let letter = section.letter {
                                 Text(letter)
                                     .accessibilityAddTraits(.isHeader)
                             }
+                        }
+                    }
+                }
+                .contextMenu(forSelectionType: String.self) { ids in
+                    let contextualItems = items.filter { ids.contains($0.id) }
+                    if let item = contextualItems.first {
+                        if contextualItems.count == 1, let onToggleFavorite {
+                            Button(item.isFavorite ? "Unfavorite" : "Favorite") {
+                                onToggleFavorite(item)
+                            }
+                        }
+                        if let onArchive {
+                            Button(isArchive ? String(localized: "Unarchive") : String(localized: "Archive")) {
+                                onArchive(contextualItems)
+                            }
+                            .accessibilityIdentifier("archive.contextAction")
+                        }
+                        if onDelete != nil {
+                            Button("Delete", role: .destructive) {
+                                itemIDsToDelete = contextualItems.map(\.id)
+                                itemNameToDelete = contextualItems.count == 1 ? item.name : nil
+                                showDeleteAlert = true
+                            }
+                            .accessibilityIdentifier("itemList.deleteAction")
                         }
                     }
                 }
@@ -157,20 +141,18 @@ struct ItemListView: View {
                     didFocusList = true
                     isListFocused = true
                 }
-                // Soft-delete confirmation alert — shown when the user selects "Delete"
-                // from a row context menu. The item is only moved to Trash, not permanently
-                // deleted; it can be recovered from the Trash view.
-                .alert(
-                    "Move to Trash?",
-                    isPresented: $showDeleteAlert,
-                    presenting:  itemToDelete
-                ) { item in
+                .alert("Move to Trash?", isPresented: $showDeleteAlert) {
                     Button("Move to Trash", role: .destructive) {
-                        Task { await onDelete?(item.id) }
+                        let ids = itemIDsToDelete
+                        Task { await onDelete?(ids) }
                     }
                     Button("Cancel", role: .cancel) {}
-                } message: { item in
-                    Text("\"\(item.name)\" will be moved to Trash.")
+                } message: {
+                    if let name = itemNameToDelete {
+                        Text("\"\(name)\" will be moved to Trash.")
+                    } else {
+                        Text("\(itemIDsToDelete.count) items will be moved to Trash.")
+                    }
                 }
             }
         }

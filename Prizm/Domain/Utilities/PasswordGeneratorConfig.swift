@@ -15,6 +15,8 @@ struct PasswordGeneratorConfig {
 
     // MARK: - Password mode
 
+    static let passwordLengthRange = 6...32
+
     var length: Int = 16
     var includeUppercase: Bool = true
     var includeLowercase: Bool = true
@@ -65,7 +67,8 @@ struct PasswordGeneratorConfig {
             config.mode = m
         }
         if defaults.object(forKey: Key.length) != nil {
-            config.length = max(5, min(128, defaults.integer(forKey: Key.length)))
+            config.length = max(passwordLengthRange.lowerBound,
+                                min(passwordLengthRange.upperBound, defaults.integer(forKey: Key.length)))
         }
         if defaults.object(forKey: Key.includeUppercase) != nil {
             config.includeUppercase = defaults.bool(forKey: Key.includeUppercase)
